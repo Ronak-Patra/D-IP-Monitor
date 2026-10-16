@@ -82,6 +82,11 @@ class TracerouteDialog(QDialog):
         self.target_ip = target_ip
         self.setWindowTitle(f"Traceroute — {target_ip}")
         self.resize(750, 480)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinMaxButtonsHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         self.worker = None
 
         layout = QVBoxLayout(self)
@@ -241,6 +246,11 @@ class PortCheckerDialog(QDialog):
         self.target_ip = target_ip
         self.setWindowTitle(f"TCP Port Checker — {target_ip}")
         self.resize(650, 520)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinMaxButtonsHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         self.worker = None
 
         layout = QVBoxLayout(self)
@@ -364,6 +374,11 @@ class DnsLookupDialog(QDialog):
         self.target = target
         self.setWindowTitle(f"DNS & Reverse Lookup — {target}")
         self.resize(520, 380)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinMaxButtonsHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
 
         layout = QVBoxLayout(self)
 
@@ -477,6 +492,11 @@ class ContinuousPingDialog(QDialog):
         self.target_ip = target_ip
         self.setWindowTitle(f"Live Continuous Ping — {target_ip}")
         self.resize(680, 480)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinMaxButtonsHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         self.worker = None
 
         self.sent_count = 0
@@ -485,12 +505,38 @@ class ContinuousPingDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Header summary bar
+        # Header summary bar with Pin on Top toggle
         header_layout = QHBoxLayout()
         self.stats_label = QLabel("Sent: 0 | Received: 0 | Lost: 0 (0%) | Avg: 0ms")
         self.stats_label.setStyleSheet("font-weight: bold; color: #0284c7; font-size: 12px;")
         header_layout.addWidget(self.stats_label)
         header_layout.addStretch()
+
+        self.btn_pin = QPushButton("📌 Pin on Top")
+        self.btn_pin.setCheckable(True)
+        self.btn_pin.setFixedWidth(105)
+        self.btn_pin.setStyleSheet("""
+            QPushButton {
+                background-color: #0f172a;
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                padding: 3px 6px;
+                color: #94a3b8;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                border-color: #00e5ff;
+                color: #00e5ff;
+            }
+            QPushButton:checked {
+                background-color: #0284c7;
+                border-color: #00e5ff;
+                color: #ffffff;
+                font-weight: bold;
+            }
+        """)
+        self.btn_pin.toggled.connect(self.toggle_pin_on_top)
+        header_layout.addWidget(self.btn_pin)
         layout.addLayout(header_layout)
 
         # Terminal text display
@@ -564,6 +610,17 @@ class ContinuousPingDialog(QDialog):
         self.stats_label.setText(
             f"Sent: {self.sent_count} | Received: {self.received_count} | Lost: {lost} ({loss_pct:.1f}%) | Avg RTT: {avg_rtt:.1f}ms"
         )
+
+    def toggle_pin_on_top(self, checked: bool):
+        flags = self.windowFlags()
+        if checked:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+            self.btn_pin.setText("📌 Pinned")
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+            self.btn_pin.setText("📌 Pin on Top")
+        self.setWindowFlags(flags)
+        self.show()
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():

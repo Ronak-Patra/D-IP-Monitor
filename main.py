@@ -1225,13 +1225,15 @@ class IPMonitorApp(QMainWindow):
         """Opens a modeless diagnostic dialog so the main window and other hosts stay 100% interactive."""
         # If already open for this IP, bring it to front
         for open_dlg in self.active_diagnostic_dialogs:
-            if isinstance(open_dlg, dialog_class) and getattr(open_dlg, 'target_ip', None) == target_ip:
+            dlg_target = getattr(open_dlg, 'target_ip', getattr(open_dlg, 'target', None))
+            if isinstance(open_dlg, dialog_class) and dlg_target == target_ip:
                 open_dlg.raise_()
                 open_dlg.activateWindow()
                 return open_dlg
 
-        dlg = dialog_class(target_ip, self)
-        dlg.setWindowModality(Qt.WindowModality.NonModal)
+        # Pass parent=None so this window is an independent desktop window and does NOT minimize with the main app!
+        dlg = dialog_class(target_ip, parent=None)
+        dlg.setWindowIcon(self.windowIcon())
         self.active_diagnostic_dialogs.append(dlg)
         dlg.finished.connect(lambda _: self._cleanup_diagnostic_dialog(dlg))
         dlg.show()
@@ -2346,6 +2348,13 @@ class IPMonitorApp(QMainWindow):
         self.log_manager.shutdown()
         if self.floating_hud:
             self.floating_hud.close()
+
+        for dlg in list(self.active_diagnostic_dialogs):
+            try:
+                dlg.close()
+            except Exception:
+                pass
+        self.active_diagnostic_dialogs.clear()
 
         QApplication.quit()
 
