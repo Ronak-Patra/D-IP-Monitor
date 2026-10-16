@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.manifest
+*.spec.bak
+
+# Logs and databases
+*.log
+logs/
+incident_log.txt
+critical_error_fallback.log
+
+# User-specific / Local Configuration & Sensitive Credentials
+# (Prevents leaking SMTP passwords, Webhook URLs, and private IP lists)
+settings.ini
+monitored_ips.json
+
+# Operating System & IDE files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
