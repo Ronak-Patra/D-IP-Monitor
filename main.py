@@ -585,10 +585,9 @@ class IPMonitorApp(QMainWindow):
         self.system_tray_manager.mute_toggled.connect(self._on_tray_mute_toggled)
         self.system_tray_manager.exit_requested.connect(self.force_exit_app)
 
-        # Floating Mini HUD
+        # Floating Mini HUD (Starts hidden on newly opened app; user toggles on demand)
         self.floating_hud = FloatingHudWidget()
-        if self.settings_manager.get_setting("UI", "enable_floating_hud", bool):
-            self.floating_hud.show()
+        self.floating_hud.hud_closed.connect(self._on_hud_closed)
 
         # UI Init
         self.init_ui()
@@ -1160,12 +1159,18 @@ class IPMonitorApp(QMainWindow):
     def apply_theme(self, is_dark: bool):
         palette = get_dark_palette() if is_dark else get_light_palette()
         app = QApplication.instance()
+        theme_qss = get_dark_theme() if is_dark else get_light_theme()
         if app:
             app.setPalette(palette)
-        theme_qss = get_dark_theme() if is_dark else get_light_theme()
+            app.setStyleSheet(theme_qss)
         self.setStyleSheet(theme_qss)
         self.sparkline_widget.set_dark_mode(is_dark)
         self.btn_theme_toggle.setText("☀️ Light Mode" if is_dark else "🌙 Dark Mode")
+        for dlg in self.active_diagnostic_dialogs:
+            try:
+                dlg.setStyleSheet(theme_qss)
+            except Exception:
+                pass
 
     # --- METRICS DOCK POSITION ---
     def toggle_dashboard_dock_position(self):
@@ -1191,6 +1196,11 @@ class IPMonitorApp(QMainWindow):
         self.sparkline_widget.show()
 
     # --- FLOATING MINI HUD ---
+    def _on_hud_closed(self):
+        self.btn_toggle_hud.setChecked(False)
+        self.settings_manager.set_setting("UI", "enable_floating_hud", "False")
+        self.save_load_worker.save_settings_async()
+
     def toggle_floating_hud(self):
         if self.floating_hud.isVisible():
             self.floating_hud.hide()
@@ -1239,6 +1249,9 @@ class IPMonitorApp(QMainWindow):
         # Pass parent=None so this window is an independent desktop window and does NOT minimize with the main app!
         dlg = dialog_class(target_ip, parent=None)
         dlg.setWindowIcon(self.windowIcon())
+        is_dark = self.settings_manager.get_setting("UI", "dark_mode", bool)
+        theme_qss = get_dark_theme() if (is_dark if is_dark is not None else True) else get_light_theme()
+        dlg.setStyleSheet(theme_qss)
         self.active_diagnostic_dialogs.append(dlg)
         dlg.finished.connect(lambda _: self._cleanup_diagnostic_dialog(dlg))
         if minimized:

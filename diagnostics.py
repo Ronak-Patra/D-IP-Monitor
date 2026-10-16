@@ -11,6 +11,88 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QFont, QIcon
 
+def apply_diagnostic_theme(dialog: QDialog):
+    """Applies high-contrast dark cyber theme to diagnostic dialogs so all buttons, inputs, and text are crisp and visible."""
+    dialog.setStyleSheet("""
+        QDialog {
+            background-color: #070c16;
+            color: #f1f5f9;
+            font-family: 'Segoe UI', 'Inter', -apple-system, sans-serif;
+        }
+        QLabel {
+            color: #f1f5f9;
+        }
+        QPushButton {
+            background-color: #101a2c;
+            color: #f1f5f9;
+            border: 1px solid #1e2e47;
+            border-radius: 6px;
+            padding: 6px 16px;
+            font-weight: 600;
+            font-size: 12px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #17253d;
+            border-color: #00e5ff;
+            color: #00e5ff;
+        }
+        QPushButton:pressed {
+            background-color: #0a1120;
+            border-color: #0284c7;
+        }
+        QPushButton:disabled {
+            background-color: #090e18;
+            color: #475569;
+            border-color: #131c2e;
+        }
+        QLineEdit {
+            background-color: #0b1220;
+            color: #f1f5f9;
+            border: 1px solid #1e2e47;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        QLineEdit:focus {
+            border-color: #00e5ff;
+        }
+        QTextEdit {
+            background-color: #0f172a;
+            color: #38bdf8;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            padding: 8px;
+        }
+        QTableWidget {
+            background-color: #0b1220;
+            color: #f1f5f9;
+            border: 1px solid #1e2e47;
+            border-radius: 6px;
+            gridline-color: #16243b;
+        }
+        QHeaderView::section {
+            background-color: #0d1627;
+            color: #00e5ff;
+            border: 1px solid #16243b;
+            padding: 6px;
+            font-weight: 700;
+        }
+        QProgressBar {
+            background-color: #0b1220;
+            border: 1px solid #1e2e47;
+            border-radius: 4px;
+            text-align: center;
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        QProgressBar::chunk {
+            background-color: #0284c7;
+            border-radius: 3px;
+        }
+    """)
+
 # --- 1. TRACEROUTE ---
 class TracerouteWorker(QThread):
     hop_received = pyqtSignal(int, str, str, str, str) # hop, rtt1, rtt2, rtt3, host
@@ -87,6 +169,7 @@ class TracerouteDialog(QDialog):
             Qt.WindowType.WindowMinMaxButtonsHint |
             Qt.WindowType.WindowCloseButtonHint
         )
+        apply_diagnostic_theme(self)
         self.worker = None
 
         layout = QVBoxLayout(self)
@@ -251,6 +334,7 @@ class PortCheckerDialog(QDialog):
             Qt.WindowType.WindowMinMaxButtonsHint |
             Qt.WindowType.WindowCloseButtonHint
         )
+        apply_diagnostic_theme(self)
         self.worker = None
 
         layout = QVBoxLayout(self)
@@ -379,6 +463,7 @@ class DnsLookupDialog(QDialog):
             Qt.WindowType.WindowMinMaxButtonsHint |
             Qt.WindowType.WindowCloseButtonHint
         )
+        apply_diagnostic_theme(self)
 
         layout = QVBoxLayout(self)
 
@@ -389,7 +474,7 @@ class DnsLookupDialog(QDialog):
         self.result_display = QTextEdit()
         self.result_display.setReadOnly(True)
         self.result_display.setFont(QFont("Consolas", 10))
-        self.result_display.setStyleSheet("background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px;")
+        self.result_display.setStyleSheet("background-color: #0f172a; color: #38bdf8; border: 1px solid #1e293b; border-radius: 6px; padding: 10px;")
         layout.addWidget(self.result_display)
 
         btn_layout = QHBoxLayout()
@@ -497,6 +582,7 @@ class ContinuousPingDialog(QDialog):
             Qt.WindowType.WindowMinMaxButtonsHint |
             Qt.WindowType.WindowCloseButtonHint
         )
+        apply_diagnostic_theme(self)
         self.worker = None
 
         self.sent_count = 0
@@ -544,18 +630,19 @@ class ContinuousPingDialog(QDialog):
         self.terminal.setReadOnly(True)
         self.terminal.setFont(QFont("Consolas", 10))
         self.terminal.setStyleSheet(
-            "background-color: #0f172a; color: #38bdf8; border-radius: 6px; padding: 10px;"
+            "background-color: #0f172a; color: #38bdf8; border: 1px solid #1e293b; border-radius: 6px; padding: 10px;"
         )
         self.terminal.document().setMaximumBlockCount(2000)
         layout.addWidget(self.terminal)
 
         # Bottom buttons
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
         self.btn_pause = QPushButton("Stop")
         self.btn_pause.clicked.connect(self.toggle_stream)
         btn_clear = QPushButton("Clear")
         btn_clear.clicked.connect(self.clear_stream)
-        btn_min = QPushButton("🗕 Minimize")
+        btn_min = QPushButton("Minimize")
         btn_min.setToolTip("Minimize to Windows taskbar while pinging in background")
         btn_min.clicked.connect(self.showMinimized)
         btn_close = QPushButton("Close")

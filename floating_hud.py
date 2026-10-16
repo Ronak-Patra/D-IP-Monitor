@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QCursor, QPixmap
 
 class FloatingHudWidget(QWidget):
@@ -12,6 +12,7 @@ class FloatingHudWidget(QWidget):
     Compact, Always-On-Top cyber-themed semi-transparent desktop HUD widget
     displaying real-time network health metrics pills in a sleek floating telemetry bar.
     """
+    hud_closed = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -104,7 +105,7 @@ class FloatingHudWidget(QWidget):
                 border: 1px solid #ef4444;
             }
         """)
-        btn_close.clicked.connect(self.hide)
+        btn_close.clicked.connect(self._handle_close)
         title_bar.addWidget(btn_close)
 
         container_layout.addLayout(title_bar)
@@ -200,3 +201,11 @@ class FloatingHudWidget(QWidget):
         if event.buttons() == Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
+
+    def _handle_close(self):
+        self.hide()
+        self.hud_closed.emit()
+
+    def closeEvent(self, event):
+        self.hud_closed.emit()
+        super().closeEvent(event)
