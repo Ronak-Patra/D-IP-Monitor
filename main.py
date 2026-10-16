@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QLabel, QCheckBox, QSplitter, QTextEdit, QFileDialog, QMessageBox,
     QHeaderView, QSizePolicy, QFormLayout, QScrollArea, QTabBar,
-    QMenu, QComboBox, QToolButton, QFrame, QTabWidget, QInputDialog
+    QMenu, QComboBox, QToolButton, QFrame, QTabWidget, QInputDialog,
+    QTableWidgetSelectionRange
 )
 from PyQt6.QtGui import QColor, QFont, QIcon, QBrush, QPixmap, QAction, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QEvent, QPoint
@@ -540,6 +541,7 @@ class IPMonitorApp(QMainWindow):
         self.ips_to_update_ui = set()
         self.current_selected_ip = None
         self.active_category_filter = "All"
+        self.active_diagnostic_dialogs = []
 
         # Concurrency Ping Engine
         self.ping_engine = PingEngine(
@@ -1219,6 +1221,28 @@ class IPMonitorApp(QMainWindow):
             self.log_manager.log_incident(f"Batch imported {added_count} host(s) from IP Scanner.")
 
     # --- DIAGNOSTIC TOOLS & BATCH CONTEXT MENU ---
+    def _open_diagnostic_dialog(self, dialog_class, target_ip: str):
+        """Opens a modeless diagnostic dialog so the main window and other hosts stay 100% interactive."""
+        # If already open for this IP, bring it to front
+        for open_dlg in self.active_diagnostic_dialogs:
+            if isinstance(open_dlg, dialog_class) and getattr(open_dlg, 'target_ip', None) == target_ip:
+                open_dlg.raise_()
+                open_dlg.activateWindow()
+                return open_dlg
+
+        dlg = dialog_class(target_ip, self)
+        dlg.setWindowModality(Qt.WindowModality.NonModal)
+        self.active_diagnostic_dialogs.append(dlg)
+        dlg.finished.connect(lambda _: self._cleanup_diagnostic_dialog(dlg))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def _cleanup_diagnostic_dialog(self, dlg):
+        if dlg in self.active_diagnostic_dialogs:
+            self.active_diagnostic_dialogs.remove(dlg)
+
     def show_host_context_menu(self, pos):
         clicked_item = self.ip_status_table.itemAt(pos)
         if not clicked_item:
@@ -1227,7 +1251,17 @@ class IPMonitorApp(QMainWindow):
 
         selected_indexes = self.ip_status_table.selectionModel().selectedRows()
         selected_rows = sorted(list(set(idx.row() for idx in selected_indexes)))
-        if clicked_row not in selected_rows:
+
+        # Allow Ctrl + Right Click to append to selection
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            if clicked_row not in selected_rows:
+                selected_rows.append(clicked_row)
+                self.ip_status_table.setRangeSelected(
+                    QTableWidgetSelectionRange(clicked_row, 0, clicked_row, self.ip_status_table.columnCount() - 1),
+                    True
+                )
+        elif clicked_row not in selected_rows:
             self.ip_status_table.selectRow(clicked_row)
             selected_rows = [clicked_row]
 
@@ -1258,18 +1292,18 @@ class IPMonitorApp(QMainWindow):
             menu.addAction(title_action)
             menu.addSeparator()
 
-            # Diagnostics Sub-Actions
+            # Modeless Diagnostics (Allows clicking/pinging other hosts while open!)
+            act_cping = menu.addAction("Live Continuous Ping")
+            act_cping.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip))
+
             act_trace = menu.addAction("Traceroute (tracert)")
-            act_trace.triggered.connect(lambda: TracerouteDialog(target_ip, self).exec())
+            act_trace.triggered.connect(lambda: self._open_diagnostic_dialog(TracerouteDialog, target_ip))
 
             act_ports = menu.addAction("TCP Port Checker")
-            act_ports.triggered.connect(lambda: PortCheckerDialog(target_ip, self).exec())
+            act_ports.triggered.connect(lambda: self._open_diagnostic_dialog(PortCheckerDialog, target_ip))
 
             act_dns = menu.addAction("DNS & Reverse Lookup")
-            act_dns.triggered.connect(lambda: DnsLookupDialog(target_ip, self).exec())
-
-            act_cping = menu.addAction("Live Continuous Ping")
-            act_cping.triggered.connect(lambda: ContinuousPingDialog(target_ip, self).exec())
+            act_dns.triggered.connect(lambda: self._open_diagnostic_dialog(DnsLookupDialog, target_ip))
 
             menu.addSeparator()
 
@@ -1290,9 +1324,20 @@ class IPMonitorApp(QMainWindow):
             menu.addAction(title_action)
             menu.addSeparator()
 
-            # Multi-Host Diagnostics
-            act_cping_all = menu.addAction(f"Continuous Ping All ({count} Hosts)")
+            # Multi-Host Diagnostics (Opens non-modal windows for all selected hosts)
+            act_cping_all = menu.addAction(f"Live Continuous Ping ({count} Hosts)")
             act_cping_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips))
+
+            act_trace_all = menu.addAction(f"Traceroute ({count} Hosts)")
+            act_trace_all.triggered.connect(lambda: self._batch_traceroute(selected_ips))
+
+            act_ports_all = menu.addAction(f"Port Checker ({count} Hosts)")
+            act_ports_all.triggered.connect(lambda: self._batch_port_checker(selected_ips))
+
+            act_dns_all = menu.addAction(f"DNS Lookup ({count} Hosts)")
+            act_dns_all.triggered.connect(lambda: self._batch_dns_lookup(selected_ips))
+
+            menu.addSeparator()
 
             act_http_all = menu.addAction(f"Open All in Browser (HTTP)")
             act_http_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "http"))
@@ -1301,6 +1346,13 @@ class IPMonitorApp(QMainWindow):
             act_https_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "https"))
 
         menu.addSeparator()
+
+        # Selection Options Submenu
+        sel_menu = menu.addMenu("☑️ Selection Options")
+        act_sel_all = sel_menu.addAction("Select All Hosts (Ctrl+A)")
+        act_sel_all.triggered.connect(self.ip_status_table.selectAll)
+        act_clear_sel = sel_menu.addAction("Clear Selection")
+        act_clear_sel.triggered.connect(self.ip_status_table.clearSelection)
 
         # Batch & Single Alert Controls Submenu
         alert_menu = menu.addMenu(f"🔔 Alert Settings ({count} host{'s' if count > 1 else ''})")
@@ -1462,16 +1514,52 @@ class IPMonitorApp(QMainWindow):
             webbrowser.open(f"{protocol}://{ip}")
 
     def _batch_continuous_ping(self, ips: list):
-        if len(ips) > 5:
+        if len(ips) > 6:
             reply = QMessageBox.question(
                 self, "Continuous Ping",
-                f"You have selected {len(ips)} hosts. Launching continuous ping will open {len(ips)} diagnostic windows.\n\nDo you want to continue?",
+                f"You have selected {len(ips)} hosts. Launching continuous ping will open {len(ips)} live diagnostic windows.\n\nDo you want to continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
         for ip in ips:
-            ContinuousPingDialog(ip, self).show()
+            self._open_diagnostic_dialog(ContinuousPingDialog, ip)
+
+    def _batch_traceroute(self, ips: list):
+        if len(ips) > 5:
+            reply = QMessageBox.question(
+                self, "Traceroute",
+                f"You have selected {len(ips)} hosts. Launching traceroute will open {len(ips)} diagnostic windows.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for ip in ips:
+            self._open_diagnostic_dialog(TracerouteDialog, ip)
+
+    def _batch_port_checker(self, ips: list):
+        if len(ips) > 5:
+            reply = QMessageBox.question(
+                self, "Port Checker",
+                f"You have selected {len(ips)} hosts. Launching port checker will open {len(ips)} diagnostic windows.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for ip in ips:
+            self._open_diagnostic_dialog(PortCheckerDialog, ip)
+
+    def _batch_dns_lookup(self, ips: list):
+        if len(ips) > 5:
+            reply = QMessageBox.question(
+                self, "DNS Lookup",
+                f"You have selected {len(ips)} hosts. Launching DNS lookup will open {len(ips)} diagnostic windows.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for ip in ips:
+            self._open_diagnostic_dialog(DnsLookupDialog, ip)
 
     def _batch_remove_hosts(self, ips: list):
         count = len(ips)
