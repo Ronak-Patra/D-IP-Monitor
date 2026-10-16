@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QLabel, QCheckBox, QSplitter, QTextEdit, QFileDialog, QMessageBox,
     QHeaderView, QSizePolicy, QFormLayout, QScrollArea, QTabBar,
-    QMenu, QComboBox, QToolButton, QFrame, QTabWidget
+    QMenu, QComboBox, QToolButton, QFrame, QTabWidget, QInputDialog
 )
 from PyQt6.QtGui import QColor, QFont, QIcon, QBrush, QPixmap, QAction, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QEvent, QPoint
@@ -1089,7 +1089,7 @@ class IPMonitorApp(QMainWindow):
         self.ip_status_table.horizontalHeader().setStretchLastSection(True)
 
         self.ip_status_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.ip_status_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.ip_status_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.ip_status_table.setAlternatingRowColors(True)
         self.ip_status_table.verticalHeader().setDefaultSectionSize(32)
         self.ip_status_table.verticalHeader().setVisible(False)
@@ -1218,71 +1218,280 @@ class IPMonitorApp(QMainWindow):
             self.save_load_worker.save_ips_async(self.ip_data_model.monitored_ips)
             self.log_manager.log_incident(f"Batch imported {added_count} host(s) from IP Scanner.")
 
-    # --- DIAGNOSTIC TOOLS (Context Menu) ---
+    # --- DIAGNOSTIC TOOLS & BATCH CONTEXT MENU ---
     def show_host_context_menu(self, pos):
-        item = self.ip_status_table.itemAt(pos)
-        if not item:
+        clicked_item = self.ip_status_table.itemAt(pos)
+        if not clicked_item:
             return
-        row = item.row()
-        ip_item = self.ip_status_table.item(row, 0)
-        desc_item = self.ip_status_table.item(row, 1)
-        if not ip_item:
+        clicked_row = clicked_item.row()
+
+        selected_indexes = self.ip_status_table.selectionModel().selectedRows()
+        selected_rows = sorted(list(set(idx.row() for idx in selected_indexes)))
+        if clicked_row not in selected_rows:
+            self.ip_status_table.selectRow(clicked_row)
+            selected_rows = [clicked_row]
+
+        selected_ips = []
+        selected_monitors = []
+        for r in selected_rows:
+            ip_item = self.ip_status_table.item(r, 0)
+            if ip_item:
+                ip_str = ip_item.text().strip()
+                selected_ips.append(ip_str)
+                m = next((mon for mon in self.ip_data_model.monitored_ips if mon.ip_address == ip_str), None)
+                if m:
+                    selected_monitors.append(m)
+
+        if not selected_ips or not selected_monitors:
             return
 
-        target_ip = ip_item.text()
-        desc = desc_item.text() if desc_item else target_ip
-
+        count = len(selected_monitors)
         menu = QMenu(self)
 
-        title_action = QAction(f"Host: {target_ip}", menu)
-        title_action.setEnabled(False)
-        menu.addAction(title_action)
+        if count == 1:
+            target_ip = selected_ips[0]
+            m = selected_monitors[0]
+            desc = m.description if m.description and m.description != target_ip else ""
+            title_text = f"🎯 Host: {target_ip} ({desc})" if desc else f"🎯 Host: {target_ip}"
+            title_action = QAction(title_text, menu)
+            title_action.setEnabled(False)
+            menu.addAction(title_action)
+            menu.addSeparator()
+
+            # Diagnostics Sub-Actions
+            act_trace = menu.addAction("Traceroute (tracert)")
+            act_trace.triggered.connect(lambda: TracerouteDialog(target_ip, self).exec())
+
+            act_ports = menu.addAction("TCP Port Checker")
+            act_ports.triggered.connect(lambda: PortCheckerDialog(target_ip, self).exec())
+
+            act_dns = menu.addAction("DNS & Reverse Lookup")
+            act_dns.triggered.connect(lambda: DnsLookupDialog(target_ip, self).exec())
+
+            act_cping = menu.addAction("Live Continuous Ping")
+            act_cping.triggered.connect(lambda: ContinuousPingDialog(target_ip, self).exec())
+
+            menu.addSeparator()
+
+            # Quick Actions
+            act_http = menu.addAction("Open in Browser (HTTP)")
+            act_http.triggered.connect(lambda: webbrowser.open(f"http://{target_ip}"))
+
+            act_https = menu.addAction("Open in Browser (HTTPS)")
+            act_https.triggered.connect(lambda: webbrowser.open(f"https://{target_ip}"))
+
+            act_rdp = menu.addAction("Remote Desktop (RDP)")
+            act_rdp.triggered.connect(lambda: subprocess.Popen(["mstsc.exe", f"/v:{target_ip}"]))
+
+        else:
+            # Multi-host Header
+            title_action = QAction(f"⚡ Batch Actions: {count} Hosts Selected", menu)
+            title_action.setEnabled(False)
+            menu.addAction(title_action)
+            menu.addSeparator()
+
+            # Multi-Host Diagnostics
+            act_cping_all = menu.addAction(f"Continuous Ping All ({count} Hosts)")
+            act_cping_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips))
+
+            act_http_all = menu.addAction(f"Open All in Browser (HTTP)")
+            act_http_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "http"))
+
+            act_https_all = menu.addAction(f"Open All in Browser (HTTPS)")
+            act_https_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "https"))
+
         menu.addSeparator()
 
-        # Diagnostics Sub-Actions
-        act_trace = menu.addAction("Traceroute (tracert)")
-        act_trace.triggered.connect(lambda: TracerouteDialog(target_ip, self).exec())
+        # Batch & Single Alert Controls Submenu
+        alert_menu = menu.addMenu(f"🔔 Alert Settings ({count} host{'s' if count > 1 else ''})")
+        act_on_email = alert_menu.addAction("📧 Enable Email Alerts")
+        act_on_email.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "email", True))
+        act_off_email = alert_menu.addAction("📧 Disable Email Alerts")
+        act_off_email.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "email", False))
 
-        act_ports = menu.addAction("TCP Port Checker")
-        act_ports.triggered.connect(lambda: PortCheckerDialog(target_ip, self).exec())
+        alert_menu.addSeparator()
+        act_on_popup = alert_menu.addAction("💬 Enable Popup Alerts")
+        act_on_popup.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "popup", True))
+        act_off_popup = alert_menu.addAction("💬 Disable Popup Alerts")
+        act_off_popup.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "popup", False))
 
-        act_dns = menu.addAction("DNS & Reverse Lookup")
-        act_dns.triggered.connect(lambda: DnsLookupDialog(target_ip, self).exec())
+        alert_menu.addSeparator()
+        act_on_sound = alert_menu.addAction("🔊 Enable Sound Alerts")
+        act_on_sound.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "sound", True))
+        act_off_sound = alert_menu.addAction("🔊 Disable Sound Alerts")
+        act_off_sound.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "sound", False))
 
-        act_cping = menu.addAction("Live Continuous Ping")
-        act_cping.triggered.connect(lambda: ContinuousPingDialog(target_ip, self).exec())
+        alert_menu.addSeparator()
+        act_on_webhook = alert_menu.addAction("🔗 Enable Webhook Alerts")
+        act_on_webhook.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "webhook", True))
+        act_off_webhook = alert_menu.addAction("🔗 Disable Webhook Alerts")
+        act_off_webhook.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "webhook", False))
+
+        alert_menu.addSeparator()
+        act_on_all = alert_menu.addAction("✅ Enable ALL Alerts")
+        act_on_all.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "all", True))
+        act_off_all = alert_menu.addAction("❌ Disable ALL Alerts")
+        act_off_all.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "all", False))
+
+        # Change Group / Tag
+        act_set_group = menu.addAction(f"🏷️ Set Group / Tag for {count} Host{'s' if count > 1 else ''}...")
+        act_set_group.triggered.connect(lambda: self._batch_set_group_tag(selected_monitors))
+
+        # Reset Stats
+        act_reset_stats = menu.addAction(f"🔄 Reset Statistics ({count} host{'s' if count > 1 else ''})")
+        act_reset_stats.triggered.connect(lambda: self._batch_reset_statistics(selected_monitors))
 
         menu.addSeparator()
 
-        # Quick Actions
-        act_http = menu.addAction("Open in Browser (HTTP)")
-        act_http.triggered.connect(lambda: webbrowser.open(f"http://{target_ip}"))
-
-        act_https = menu.addAction("Open in Browser (HTTPS)")
-        act_https.triggered.connect(lambda: webbrowser.open(f"https://{target_ip}"))
-
-        act_rdp = menu.addAction("Remote Desktop (RDP)")
-        act_rdp.triggered.connect(lambda: subprocess.Popen(["mstsc.exe", f"/v:{target_ip}"]))
+        # Clipboard
+        if count == 1:
+            act_copy = menu.addAction("📋 Copy IP Address")
+            act_copy.triggered.connect(lambda: QApplication.clipboard().setText(selected_ips[0]))
+        else:
+            clip_menu = menu.addMenu(f"📋 Copy to Clipboard ({count} hosts)")
+            act_copy_ips = clip_menu.addAction("Copy IP List (One per line)")
+            act_copy_ips.triggered.connect(lambda: self._batch_copy_ips(selected_ips, as_table=False))
+            act_copy_csv = clip_menu.addAction("Copy Host Details (TSV Table)")
+            act_copy_csv.triggered.connect(lambda: self._batch_copy_ips(selected_monitors, as_table=True))
 
         menu.addSeparator()
 
-        # Clipboard & Management
-        act_copy_ip = menu.addAction("Copy IP Address")
-        act_copy_ip.triggered.connect(lambda: QApplication.clipboard().setText(target_ip))
-
-        act_remove = menu.addAction("Remove Host")
-        act_remove.triggered.connect(lambda: self.confirm_remove_ip(target_ip))
+        # Removal
+        remove_label = "🗑️ Remove Host" if count == 1 else f"🗑️ Remove {count} Selected Hosts"
+        act_remove = menu.addAction(remove_label)
+        act_remove.triggered.connect(lambda: self._batch_remove_hosts(selected_ips))
 
         menu.exec(self.ip_status_table.viewport().mapToGlobal(pos))
 
-    def confirm_remove_ip(self, ip_address: str):
+    def _batch_set_alert(self, monitors: list, alert_type: str, enabled: bool):
+        for m in monitors:
+            if alert_type == "email":
+                m.enable_email_alerts_for_ip = enabled
+            elif alert_type == "popup":
+                m.enable_popup_alerts_for_ip = enabled
+            elif alert_type == "sound":
+                m.enable_sound_alerts_for_ip = enabled
+            elif alert_type == "webhook":
+                m.enable_webhook_alerts_for_ip = enabled
+            elif alert_type == "all":
+                m.enable_email_alerts_for_ip = enabled
+                m.enable_popup_alerts_for_ip = enabled
+                m.enable_sound_alerts_for_ip = enabled
+                m.enable_webhook_alerts_for_ip = enabled
+
+            if m.ip_address in self.ip_to_row_map:
+                row = self.ip_to_row_map[m.ip_address]
+                self._update_table_row_content(row, m)
+
+        self.save_load_worker.save_ips_async(self.ip_data_model.monitored_ips)
+        state_str = "enabled" if enabled else "disabled"
+        self.log_manager.log_incident(f"Batch {alert_type} alerts {state_str} for {len(monitors)} host(s).")
+
+    def _batch_set_group_tag(self, monitors: list):
+        default_tag = getattr(monitors[0], 'tag', 'General') if monitors else "General"
+        new_tag, ok = QInputDialog.getText(
+            self, "Set Group / Tag",
+            f"Enter new group/tag name for {len(monitors)} selected host(s):",
+            text=default_tag
+        )
+        if not ok:
+            return
+        new_tag = new_tag.strip() or "General"
+        for m in monitors:
+            m.tag = new_tag
+            if m.ip_address in self.ip_to_row_map:
+                row = self.ip_to_row_map[m.ip_address]
+                self._update_table_row_content(row, m)
+
+        self.refresh_category_tabs()
+        self.save_load_worker.save_ips_async(self.ip_data_model.monitored_ips)
+        self.log_manager.log_incident(f"Assigned group '{new_tag}' to {len(monitors)} host(s).")
+
+    def _batch_reset_statistics(self, monitors: list):
+        count = len(monitors)
         reply = QMessageBox.question(
-            self, "Confirm Remove",
-            f"Are you sure you want to remove '{ip_address}' from monitoring?",
+            self, "Reset Statistics",
+            f"Are you sure you want to reset packet loss, uptime, downtime, and latency history for {count} host(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        for m in monitors:
+            m.total_pings = 0
+            m.failed_pings = 0
+            m.packet_loss = 0.0
+            m.latency_history.clear()
+            m.ping_history.clear()
+            m.response_time = 0.0
+            m.uptime = "0s"
+            m.downtime = "0s"
+            m.unreachable_start_time = None
+            if m.status == "Reachable":
+                m.reachable_start_time = datetime.now()
+            if m.ip_address in self.ip_to_row_map:
+                row = self.ip_to_row_map[m.ip_address]
+                self._update_table_row_content(row, m)
+
+        self.save_load_worker.save_ips_async(self.ip_data_model.monitored_ips)
+        self.log_manager.log_incident(f"Reset telemetry statistics for {count} host(s).")
+
+    def _batch_copy_ips(self, items: list, as_table: bool = False):
+        if not items:
+            return
+        if not as_table:
+            text = "\n".join(str(ip) for ip in items)
+        else:
+            lines = ["IP Address\tDescription\tTag\tStatus\tPacket Loss\tLatency\tUptime\tDowntime"]
+            for m in items:
+                lines.append(f"{m.ip_address}\t{m.description}\t{getattr(m, 'tag', 'General')}\t{m.status}\t{m.packet_loss:.1f}%\t{m.response_time:.1f}ms\t{m.uptime}\t{m.downtime}")
+            text = "\n".join(lines)
+        QApplication.clipboard().setText(text)
+        self.log_manager.log_incident(f"Copied {len(items)} host(s) data to clipboard.")
+
+    def _batch_open_browser(self, ips: list, protocol: str = "http"):
+        if len(ips) > 5:
+            reply = QMessageBox.question(
+                self, "Open in Browser",
+                f"You have selected {len(ips)} hosts. Opening all of them will launch {len(ips)} browser tabs.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for ip in ips:
+            webbrowser.open(f"{protocol}://{ip}")
+
+    def _batch_continuous_ping(self, ips: list):
+        if len(ips) > 5:
+            reply = QMessageBox.question(
+                self, "Continuous Ping",
+                f"You have selected {len(ips)} hosts. Launching continuous ping will open {len(ips)} diagnostic windows.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for ip in ips:
+            ContinuousPingDialog(ip, self).show()
+
+    def _batch_remove_hosts(self, ips: list):
+        count = len(ips)
+        if count == 0:
+            return
+        if count == 1:
+            msg = f"Are you sure you want to remove '{ips[0]}' from monitoring?"
+        else:
+            msg = f"Are you sure you want to remove {count} selected hosts from monitoring?"
+
+        reply = QMessageBox.question(
+            self, "Confirm Remove", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.ip_data_model.remove_ip(ip_address)
+            for ip in ips:
+                self.ip_data_model.remove_ip(ip)
+
+    def confirm_remove_ip(self, ip_address: str):
+        self._batch_remove_hosts([ip_address])
 
     # --- COLUMN VISIBILITY CHOOSER ---
     def show_header_context_menu(self, pos):
@@ -1910,15 +2119,19 @@ class IPMonitorApp(QMainWindow):
             self.description_input.clear()
 
     def remove_ip_monitor_ui(self):
-        selected_rows = self.ip_status_table.selectionModel().selectedRows()
-        if not selected_rows:
-            QMessageBox.warning(self, "Selection Error", "Please select a host to remove.")
+        selected_indexes = self.ip_status_table.selectionModel().selectedRows()
+        if not selected_indexes:
+            QMessageBox.warning(self, "Selection Error", "Please select one or more hosts to remove.")
             return
 
-        row = selected_rows[0].row()
-        ip_item = self.ip_status_table.item(row, 0)
-        if ip_item:
-            self.confirm_remove_ip(ip_item.text())
+        selected_ips = []
+        for idx in selected_indexes:
+            ip_item = self.ip_status_table.item(idx.row(), 0)
+            if ip_item:
+                selected_ips.append(ip_item.text().strip())
+
+        if selected_ips:
+            self._batch_remove_hosts(selected_ips)
 
     def toggle_ip_alert_setting_ui(self, row: int, monitor: IpMonitor, setting: str, state: int):
         is_checked = (state == Qt.CheckState.Checked.value)
