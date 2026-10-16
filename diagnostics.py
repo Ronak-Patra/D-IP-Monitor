@@ -555,12 +555,16 @@ class ContinuousPingDialog(QDialog):
         self.btn_pause.clicked.connect(self.toggle_stream)
         btn_clear = QPushButton("Clear")
         btn_clear.clicked.connect(self.clear_stream)
+        btn_min = QPushButton("🗕 Minimize")
+        btn_min.setToolTip("Minimize to Windows taskbar while pinging in background")
+        btn_min.clicked.connect(self.showMinimized)
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.close)
 
         btn_layout.addWidget(self.btn_pause)
         btn_layout.addWidget(btn_clear)
         btn_layout.addStretch()
+        btn_layout.addWidget(btn_min)
         btn_layout.addWidget(btn_close)
         layout.addLayout(btn_layout)
 

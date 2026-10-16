@@ -1221,14 +1221,19 @@ class IPMonitorApp(QMainWindow):
             self.log_manager.log_incident(f"Batch imported {added_count} host(s) from IP Scanner.")
 
     # --- DIAGNOSTIC TOOLS & BATCH CONTEXT MENU ---
-    def _open_diagnostic_dialog(self, dialog_class, target_ip: str):
+    def _open_diagnostic_dialog(self, dialog_class, target_ip: str, minimized: bool = False):
         """Opens a modeless diagnostic dialog so the main window and other hosts stay 100% interactive."""
-        # If already open for this IP, bring it to front
+        # If already open for this IP, bring it to front or minimize as requested
         for open_dlg in self.active_diagnostic_dialogs:
             dlg_target = getattr(open_dlg, 'target_ip', getattr(open_dlg, 'target', None))
             if isinstance(open_dlg, dialog_class) and dlg_target == target_ip:
-                open_dlg.raise_()
-                open_dlg.activateWindow()
+                if minimized:
+                    open_dlg.showMinimized()
+                else:
+                    if open_dlg.isMinimized():
+                        open_dlg.showNormal()
+                    open_dlg.raise_()
+                    open_dlg.activateWindow()
                 return open_dlg
 
         # Pass parent=None so this window is an independent desktop window and does NOT minimize with the main app!
@@ -1236,9 +1241,12 @@ class IPMonitorApp(QMainWindow):
         dlg.setWindowIcon(self.windowIcon())
         self.active_diagnostic_dialogs.append(dlg)
         dlg.finished.connect(lambda _: self._cleanup_diagnostic_dialog(dlg))
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        if minimized:
+            dlg.showMinimized()
+        else:
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
         return dlg
 
     def _cleanup_diagnostic_dialog(self, dlg):
@@ -1296,7 +1304,10 @@ class IPMonitorApp(QMainWindow):
 
             # Modeless Diagnostics (Allows clicking/pinging other hosts while open!)
             act_cping = menu.addAction("Live Continuous Ping")
-            act_cping.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip))
+            act_cping.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=False))
+
+            act_cping_min = menu.addAction("🗕 Live Continuous Ping (Minimized)")
+            act_cping_min.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=True))
 
             act_trace = menu.addAction("Traceroute (tracert)")
             act_trace.triggered.connect(lambda: self._open_diagnostic_dialog(TracerouteDialog, target_ip))
@@ -1328,7 +1339,10 @@ class IPMonitorApp(QMainWindow):
 
             # Multi-Host Diagnostics (Opens non-modal windows for all selected hosts)
             act_cping_all = menu.addAction(f"Live Continuous Ping ({count} Hosts)")
-            act_cping_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips))
+            act_cping_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips, minimized=False))
+
+            act_cping_min_all = menu.addAction(f"🗕 Live Continuous Ping All ({count} Hosts, Minimized)")
+            act_cping_min_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips, minimized=True))
 
             act_trace_all = menu.addAction(f"Traceroute ({count} Hosts)")
             act_trace_all.triggered.connect(lambda: self._batch_traceroute(selected_ips))
@@ -1515,17 +1529,18 @@ class IPMonitorApp(QMainWindow):
         for ip in ips:
             webbrowser.open(f"{protocol}://{ip}")
 
-    def _batch_continuous_ping(self, ips: list):
+    def _batch_continuous_ping(self, ips: list, minimized: bool = False):
         if len(ips) > 6:
+            target_desc = "minimized to taskbar" if minimized else "on screen"
             reply = QMessageBox.question(
                 self, "Continuous Ping",
-                f"You have selected {len(ips)} hosts. Launching continuous ping will open {len(ips)} live diagnostic windows.\n\nDo you want to continue?",
+                f"You have selected {len(ips)} hosts. Launching continuous ping will open {len(ips)} live diagnostic windows ({target_desc}).\n\nDo you want to continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
         for ip in ips:
-            self._open_diagnostic_dialog(ContinuousPingDialog, ip)
+            self._open_diagnostic_dialog(ContinuousPingDialog, ip, minimized=minimized)
 
     def _batch_traceroute(self, ips: list):
         if len(ips) > 5:
