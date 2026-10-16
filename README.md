@@ -75,31 +75,6 @@ Whether running minimized in the system tray, docked to your primary desktop wit
 
 ---
 
-## 🖥️ User Interface Overview
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│  🌐 D IP Monitor  [ v2.0 Enterprise ]           [ - ] [ □ ] [ ✕ ]      │
-├────────────────────────────────────────────────────────────────────────┤
-│  [ UP: 18 ]  [ DOWN: 2 ]  [ AVG: 14.8 ms ]  [ HEALTH: 90.0% ]          │
-├────────────────────────────────────────────────────────────────────────┤
-│  Live Latency Trend: 192.168.1.1 (Gateway)                             │
-│  Sample #14/30 (16 pings ago): 12.4ms  |  Avg: 11.8ms  |  Min: 9.2ms   │
-│  ──────────────────────────┼──────────────────────────────────         │
-│                            │ [ 12.4ms ]                                │
-├────────────────────────────────────────────────────────────────────────┤
-│  Group: [ All       ▼ ]  Search: [ Filter hosts...         ]  [⚙ Cols] │
-├──────────────┬─────────────┬──────────┬──────────┬──────────┬──────────┤
-│ IP Address   │ Description │ Tag      │ Status   │ Loss     │ Latency  │
-├──────────────┼─────────────┼──────────┼──────────┼──────────┼──────────┤
-│ 192.168.1.1  │ Core Router │ Network  │ ● ONLINE │ 0%       │ 12.4 ms  │
-│ 10.0.0.5     │ File Server │ Servers  │ ● OFFLINE│ 100%     │ —        │
-│ 8.8.8.8      │ Google DNS  │ External │ ● ONLINE │ 0%       │ 14.8 ms  │
-└──────────────┴─────────────┴──────────┴──────────┴──────────┴──────────┘
-```
-
----
-
 ## 🚀 Download & Installation
 
 ### Option A: Standalone Windows Executable (Recommended)
