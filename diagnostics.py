@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QTextEdit, QProgressBar,
-    QHeaderView, QLineEdit, QGroupBox, QMessageBox
+    QHeaderView, QLineEdit, QGroupBox, QMessageBox, QWidget,
+    QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QFont, QIcon, QTextCursor
@@ -600,6 +601,8 @@ class ContinuousPingDialog(QDialog):
         self.target_ip = target_ip
         self.setWindowTitle(f"Live Continuous Ping — {target_ip}")
         self.resize(680, 480)
+        self.setMinimumWidth(320)
+        self.setMinimumHeight(280)
         self.setWindowFlags(
             Qt.WindowType.Window |
             Qt.WindowType.WindowMinMaxButtonsHint |
@@ -614,13 +617,25 @@ class ContinuousPingDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Header summary bar with Pin on Top & Auto-Scroll toggles
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(8)
+        # Header Box with dynamic responsive layout
+        self.header_box = QWidget()
+        self.header_layout = QVBoxLayout(self.header_box)
+        self.header_layout.setContentsMargins(0, 0, 0, 2)
+        self.header_layout.setSpacing(4)
+
+        self.row1_widget = QWidget()
+        self.row1_layout = QHBoxLayout(self.row1_widget)
+        self.row1_layout.setContentsMargins(0, 0, 0, 0)
+        self.row1_layout.setSpacing(8)
+
+        self.row2_widget = QWidget()
+        self.row2_layout = QHBoxLayout(self.row2_widget)
+        self.row2_layout.setContentsMargins(0, 0, 0, 0)
+        self.row2_layout.setSpacing(8)
+
         self.stats_label = QLabel("Sent: 0 | Received: 0 | Lost: 0 (0%) | Avg: 0ms")
-        self.stats_label.setStyleSheet("font-weight: bold; color: #0284c7; font-size: 12px;")
-        header_layout.addWidget(self.stats_label)
-        header_layout.addStretch()
+        self.stats_label.setStyleSheet("font-weight: bold; color: #00e5ff; font-size: 12px;")
+        self.stats_label.setWordWrap(True)
 
         self.btn_autoscroll = QPushButton("⬇ Auto-Scroll")
         self.btn_autoscroll.setCheckable(True)
@@ -647,7 +662,6 @@ class ContinuousPingDialog(QDialog):
             }
         """)
         self.btn_autoscroll.toggled.connect(self.toggle_autoscroll)
-        header_layout.addWidget(self.btn_autoscroll)
 
         self.btn_pin = QPushButton("📌 Pin on Top")
         self.btn_pin.setCheckable(True)
@@ -673,8 +687,13 @@ class ContinuousPingDialog(QDialog):
             }
         """)
         self.btn_pin.toggled.connect(self.toggle_pin_on_top)
-        header_layout.addWidget(self.btn_pin)
-        layout.addLayout(header_layout)
+
+        self.header_layout.addWidget(self.row1_widget)
+        self.header_layout.addWidget(self.row2_widget)
+        layout.addWidget(self.header_box)
+
+        self._is_compact = None
+        self._readjust_header(self.width())
 
         # Terminal text display
         self.terminal = QTextEdit()
@@ -716,7 +735,7 @@ class ContinuousPingDialog(QDialog):
 
         # Bottom action buttons with dedicated high-contrast styles
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+        btn_layout.setSpacing(6)
 
         self.btn_pause = QPushButton("Stop")
         self.btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -732,7 +751,7 @@ class ContinuousPingDialog(QDialog):
                 color: #e2e8f0;
                 border: 1px solid #1e2e47;
                 border-radius: 6px;
-                padding: 6px 18px;
+                padding: 5px 12px;
                 font-weight: 600;
                 font-size: 12px;
                 min-height: 22px;
@@ -754,7 +773,7 @@ class ContinuousPingDialog(QDialog):
                 color: #e2e8f0;
                 border: 1px solid #1e2e47;
                 border-radius: 6px;
-                padding: 6px 18px;
+                padding: 5px 12px;
                 font-weight: 600;
                 font-size: 12px;
                 min-height: 22px;
@@ -775,7 +794,7 @@ class ContinuousPingDialog(QDialog):
                 color: #e2e8f0;
                 border: 1px solid #1e2e47;
                 border-radius: 6px;
-                padding: 6px 18px;
+                padding: 5px 12px;
                 font-weight: 600;
                 font-size: 12px;
                 min-height: 22px;
@@ -819,7 +838,7 @@ class ContinuousPingDialog(QDialog):
                     color: #f87171;
                     border: 1px solid #7f1d1d;
                     border-radius: 6px;
-                    padding: 6px 18px;
+                    padding: 5px 12px;
                     font-weight: 700;
                     font-size: 12px;
                     min-height: 22px;
@@ -838,13 +857,13 @@ class ContinuousPingDialog(QDialog):
                     color: #4ade80;
                     border: 1px solid #047857;
                     border-radius: 6px;
-                    padding: 6px 18px;
+                    padding: 5px 12px;
                     font-weight: 700;
                     font-size: 12px;
                     min-height: 22px;
                 }
                 QPushButton:hover {
-                    background-color: #059669;
+                    background-color: #047857;
                     border-color: #10b981;
                     color: #ffffff;
                 }
@@ -897,16 +916,45 @@ class ContinuousPingDialog(QDialog):
         vbar.setValue(vbar.maximum())
         self.btn_scroll_latest.hide()
 
-    def _on_terminal_scroll(self, val):
+    def _on_terminal_scroll(self, val=None):
         vbar = self.terminal.verticalScrollBar()
-        if val >= (vbar.maximum() - 25):
+        current_val = vbar.value() if val is None else val
+        if current_val >= (vbar.maximum() - 25):
             self.btn_scroll_latest.hide()
         else:
             self._reposition_scroll_latest_btn()
             self.btn_scroll_latest.show()
 
+    def _readjust_header(self, w: int):
+        compact = w < 680
+        if compact == self._is_compact:
+            return
+        self._is_compact = compact
+
+        for i in reversed(range(self.row1_layout.count())):
+            self.row1_layout.takeAt(i)
+        for i in reversed(range(self.row2_layout.count())):
+            self.row2_layout.takeAt(i)
+
+        self.stats_label.setWordWrap(compact)
+        if compact:
+            self.stats_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            self.row1_layout.addWidget(self.stats_label)
+            self.row2_layout.addStretch()
+            self.row2_layout.addWidget(self.btn_autoscroll)
+            self.row2_layout.addWidget(self.btn_pin)
+            self.row2_widget.show()
+        else:
+            self.stats_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            self.row1_layout.addWidget(self.stats_label)
+            self.row1_layout.addStretch()
+            self.row1_layout.addWidget(self.btn_autoscroll)
+            self.row1_layout.addWidget(self.btn_pin)
+            self.row2_widget.hide()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._readjust_header(self.width())
         self._reposition_scroll_latest_btn()
 
     def _reposition_scroll_latest_btn(self):
