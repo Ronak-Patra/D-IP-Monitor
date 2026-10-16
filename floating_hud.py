@@ -87,22 +87,29 @@ class FloatingHudWidget(QWidget):
         title_bar.addStretch()
 
         btn_close = QPushButton("✕")
-        btn_close.setFixedSize(20, 20)
+        btn_close.setObjectName("hudCloseBtn")
+        btn_close.setFixedSize(22, 22)
         btn_close.setToolTip("Hide Mini HUD")
         btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_close.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 0.05);
+            QPushButton#hudCloseBtn {
+                background-color: rgba(255, 255, 255, 0.05);
                 color: #94a3b8;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 10px;
-                font-size: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 11px;
+                padding: 0px;
+                margin: 0px;
+                min-height: 0px;
+                min-width: 0px;
+                font-family: Arial, -apple-system, sans-serif;
+                font-size: 12px;
                 font-weight: bold;
+                text-align: center;
             }
-            QPushButton:hover {
-                background: #ef4444;
+            QPushButton#hudCloseBtn:hover {
+                background-color: #ef4444;
+                border-color: #ef4444;
                 color: #ffffff;
-                border: 1px solid #ef4444;
             }
         """)
         btn_close.clicked.connect(self._handle_close)

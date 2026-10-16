@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QLineEdit, QGroupBox, QMessageBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor, QFont, QIcon
+from PyQt6.QtGui import QColor, QFont, QIcon, QTextCursor
 
 def apply_diagnostic_theme(dialog: QDialog):
     """Applies high-contrast dark cyber theme to diagnostic dialogs so all buttons, inputs, and text are crisp and visible."""
@@ -90,6 +90,29 @@ def apply_diagnostic_theme(dialog: QDialog):
         QProgressBar::chunk {
             background-color: #0284c7;
             border-radius: 3px;
+        }
+        QScrollBar:vertical {
+            background: #0b1220;
+            width: 10px;
+            margin: 0px;
+            border: none;
+        }
+        QScrollBar::handle:vertical {
+            background: #1e2e47;
+            min-height: 25px;
+            border-radius: 5px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #00e5ff;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+            width: 0px;
+            background: none;
+            border: none;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
         }
     """)
 
@@ -591,12 +614,40 @@ class ContinuousPingDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Header summary bar with Pin on Top toggle
+        # Header summary bar with Pin on Top & Auto-Scroll toggles
         header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
         self.stats_label = QLabel("Sent: 0 | Received: 0 | Lost: 0 (0%) | Avg: 0ms")
         self.stats_label.setStyleSheet("font-weight: bold; color: #0284c7; font-size: 12px;")
         header_layout.addWidget(self.stats_label)
         header_layout.addStretch()
+
+        self.btn_autoscroll = QPushButton("⬇ Auto-Scroll")
+        self.btn_autoscroll.setCheckable(True)
+        self.btn_autoscroll.setChecked(True)
+        self.btn_autoscroll.setFixedWidth(105)
+        self.btn_autoscroll.setStyleSheet("""
+            QPushButton {
+                background-color: #0f172a;
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                padding: 3px 6px;
+                color: #94a3b8;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                border-color: #00e5ff;
+                color: #00e5ff;
+            }
+            QPushButton:checked {
+                background-color: #064e3b;
+                border-color: #10b981;
+                color: #34d399;
+                font-weight: bold;
+            }
+        """)
+        self.btn_autoscroll.toggled.connect(self.toggle_autoscroll)
+        header_layout.addWidget(self.btn_autoscroll)
 
         self.btn_pin = QPushButton("📌 Pin on Top")
         self.btn_pin.setCheckable(True)
@@ -632,21 +683,109 @@ class ContinuousPingDialog(QDialog):
         self.terminal.setStyleSheet(
             "background-color: #0f172a; color: #38bdf8; border: 1px solid #1e293b; border-radius: 6px; padding: 10px;"
         )
-        self.terminal.document().setMaximumBlockCount(2000)
+        self.terminal.document().setMaximumBlockCount(3000)
         layout.addWidget(self.terminal)
 
-        # Bottom buttons
+        # Floating "▼ Latest" action button inside terminal
+        self.btn_scroll_latest = QPushButton("▼ Latest", self.terminal)
+        self.btn_scroll_latest.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_scroll_latest.setFixedHeight(28)
+        self.btn_scroll_latest.setToolTip("Scroll directly to latest ping")
+        self.btn_scroll_latest.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: 1px solid #00e5ff;
+                border-radius: 14px;
+                padding: 4px 12px;
+                font-weight: 700;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+                border-color: #ffffff;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #0284c7;
+            }
+        """)
+        self.btn_scroll_latest.clicked.connect(self.scroll_to_latest)
+        self.btn_scroll_latest.hide()
+        self.terminal.verticalScrollBar().valueChanged.connect(self._on_terminal_scroll)
+
+        # Bottom action buttons with dedicated high-contrast styles
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(10)
+
         self.btn_pause = QPushButton("Stop")
+        self.btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pause.clicked.connect(self.toggle_stream)
+        self._set_pause_button_style(is_running=True)
+
         btn_clear = QPushButton("Clear")
+        btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_clear.clicked.connect(self.clear_stream)
+        btn_clear.setStyleSheet("""
+            QPushButton {
+                background-color: #101a2c;
+                color: #e2e8f0;
+                border: 1px solid #1e2e47;
+                border-radius: 6px;
+                padding: 6px 18px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 22px;
+            }
+            QPushButton:hover {
+                background-color: #17253d;
+                border-color: #00e5ff;
+                color: #00e5ff;
+            }
+        """)
+
         btn_min = QPushButton("Minimize")
+        btn_min.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_min.setToolTip("Minimize to Windows taskbar while pinging in background")
         btn_min.clicked.connect(self.showMinimized)
+        btn_min.setStyleSheet("""
+            QPushButton {
+                background-color: #101a2c;
+                color: #e2e8f0;
+                border: 1px solid #1e2e47;
+                border-radius: 6px;
+                padding: 6px 18px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 22px;
+            }
+            QPushButton:hover {
+                background-color: #17253d;
+                border-color: #00e5ff;
+                color: #00e5ff;
+            }
+        """)
+
         btn_close = QPushButton("Close")
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.clicked.connect(self.close)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #101a2c;
+                color: #e2e8f0;
+                border: 1px solid #1e2e47;
+                border-radius: 6px;
+                padding: 6px 18px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 22px;
+            }
+            QPushButton:hover {
+                background-color: #991b1b;
+                border-color: #ef4444;
+                color: #ffffff;
+            }
+        """)
 
         btn_layout.addWidget(self.btn_pause)
         btn_layout.addWidget(btn_clear)
@@ -660,16 +799,56 @@ class ContinuousPingDialog(QDialog):
     def start_stream(self):
         self.worker = ContinuousPingWorker(self.target_ip)
         self.worker.ping_output_line.connect(self.on_ping_line)
-        self.worker.finished.connect(lambda: self.btn_pause.setText("Restart"))
+        self.worker.finished.connect(lambda: self._set_pause_button_style(is_running=False))
         self.worker.start()
-        self.btn_pause.setText("Stop")
+        self._set_pause_button_style(is_running=True)
 
     def toggle_stream(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.btn_pause.setText("Resume")
+            self._set_pause_button_style(is_running=False)
         else:
             self.start_stream()
+
+    def _set_pause_button_style(self, is_running: bool):
+        if is_running:
+            self.btn_pause.setText("Stop")
+            self.btn_pause.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e141a;
+                    color: #f87171;
+                    border: 1px solid #7f1d1d;
+                    border-radius: 6px;
+                    padding: 6px 18px;
+                    font-weight: 700;
+                    font-size: 12px;
+                    min-height: 22px;
+                }
+                QPushButton:hover {
+                    background-color: #991b1b;
+                    border-color: #ef4444;
+                    color: #ffffff;
+                }
+            """)
+        else:
+            self.btn_pause.setText("Resume")
+            self.btn_pause.setStyleSheet("""
+                QPushButton {
+                    background-color: #062b1b;
+                    color: #4ade80;
+                    border: 1px solid #047857;
+                    border-radius: 6px;
+                    padding: 6px 18px;
+                    font-weight: 700;
+                    font-size: 12px;
+                    min-height: 22px;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                    border-color: #10b981;
+                    color: #ffffff;
+                }
+            """)
 
     def clear_stream(self):
         self.terminal.clear()
@@ -690,9 +869,60 @@ class ContinuousPingDialog(QDialog):
             # Red output for timeout/failure
             color = "#f87171"
 
-        self.terminal.append(f"<span style='color:{color};'>{line}</span>")
-        self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
+        vbar = self.terminal.verticalScrollBar()
+        was_at_bottom = vbar.value() >= (vbar.maximum() - 25)
+        prev_pos = vbar.value()
+
+        # Insert at the end using text cursor cleanly on its own block
+        cursor = self.terminal.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if self.terminal.document().characterCount() > 1:
+            cursor.insertBlock()
+        cursor.insertHtml(f"<span style='color:{color}; font-family:Consolas, monospace;'>{line}</span>")
+
+        if self.btn_autoscroll.isChecked() and was_at_bottom:
+            vbar.setValue(vbar.maximum())
+            self.btn_scroll_latest.hide()
+        else:
+            # Keep user's exact scroll position untouched when scrolled into the middle!
+            vbar.setValue(prev_pos)
+            self._reposition_scroll_latest_btn()
+            self.btn_scroll_latest.show()
+
         self.update_stats()
+
+    def scroll_to_latest(self):
+        self.btn_autoscroll.setChecked(True)
+        vbar = self.terminal.verticalScrollBar()
+        vbar.setValue(vbar.maximum())
+        self.btn_scroll_latest.hide()
+
+    def _on_terminal_scroll(self, val):
+        vbar = self.terminal.verticalScrollBar()
+        if val >= (vbar.maximum() - 25):
+            self.btn_scroll_latest.hide()
+        else:
+            self._reposition_scroll_latest_btn()
+            self.btn_scroll_latest.show()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposition_scroll_latest_btn()
+
+    def _reposition_scroll_latest_btn(self):
+        if not hasattr(self, 'terminal') or not hasattr(self, 'btn_scroll_latest'):
+            return
+        t_w = self.terminal.width()
+        t_h = self.terminal.height()
+        btn_w = self.btn_scroll_latest.width() or 80
+        btn_h = self.btn_scroll_latest.height() or 28
+        # Float in the bottom-right corner of the terminal, leaving space for scrollbar
+        self.btn_scroll_latest.move(max(10, t_w - btn_w - 20), max(10, t_h - btn_h - 15))
+
+    def toggle_autoscroll(self, checked: bool):
+        if checked:
+            self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
+            self.btn_scroll_latest.hide()
 
     def update_stats(self):
         lost = self.sent_count - self.received_count
