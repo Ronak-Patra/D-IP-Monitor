@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QProgressBar,
-    QHeaderView, QCheckBox, QFileDialog, QMessageBox, QGroupBox
+    QHeaderView, QCheckBox, QFileDialog, QMessageBox, QGroupBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -151,36 +151,53 @@ class IpRangeScannerDialog(QDialog):
         # Range Input Form
         range_group = QGroupBox("Subnet Scan Configuration")
         range_layout = QHBoxLayout(range_group)
+        range_layout.setContentsMargins(12, 10, 12, 10)
+        range_layout.setSpacing(8)
 
-        range_layout.addWidget(QLabel("Start IP:"))
+        lbl_start = QLabel("Start IP:")
+        lbl_start.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        range_layout.addWidget(lbl_start)
+
         self.start_ip_input = QLineEdit("192.168.1.1")
-        self.start_ip_input.setFixedWidth(130)
+        self.start_ip_input.setFixedWidth(125)
         range_layout.addWidget(self.start_ip_input)
 
-        range_layout.addWidget(QLabel("End IP:"))
+        range_layout.addSpacing(10)
+
+        lbl_end = QLabel("End IP:")
+        lbl_end.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        range_layout.addWidget(lbl_end)
+
         self.end_ip_input = QLineEdit("192.168.1.254")
-        self.end_ip_input.setFixedWidth(130)
+        self.end_ip_input.setFixedWidth(125)
         range_layout.addWidget(self.end_ip_input)
+
+        range_layout.addSpacing(10)
 
         btn_detect_subnet = QPushButton("Auto-Detect Subnet")
         btn_detect_subnet.clicked.connect(self.auto_detect_subnet)
         range_layout.addWidget(btn_detect_subnet)
 
         self.btn_start = QPushButton("Start Scan")
-        self.btn_start.setStyleSheet("font-weight: bold; background-color: #0284c7; color: white;")
+        self.btn_start.setObjectName("btnStartScan")
         self.btn_start.clicked.connect(self.start_scan)
         range_layout.addWidget(self.btn_start)
 
         self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setObjectName("btnStopScan")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_scan)
         range_layout.addWidget(self.btn_stop)
+
+        range_layout.addStretch()
 
         layout.addWidget(range_group)
 
         # Progress bar
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("QProgressBar { height: 16px; text-align: center; }")
+        self.progress_bar.setObjectName("scanProgressBar")
+        self.progress_bar.setFixedHeight(12)
+        self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
 
         # Summary KPIs & Filter Bar
@@ -216,7 +233,7 @@ class IpRangeScannerDialog(QDialog):
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(0, 75)
         self.table.setColumnWidth(1, 130)
         self.table.setColumnWidth(2, 110)
         self.table.setColumnWidth(3, 260)

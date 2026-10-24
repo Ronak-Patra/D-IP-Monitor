@@ -780,14 +780,13 @@ class IPMonitorApp(QMainWindow):
         self.left_scroll_area.setWidgetResizable(True)
         self.left_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.left_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.left_scroll_area.setMinimumWidth(290)
         self.left_scroll_area.viewport().setObjectName("leftScrollViewport")
         self.left_scroll_area.setWidget(self.left_panel_widget)
 
         self.splitter.addWidget(self.left_scroll_area)
         self.splitter.addWidget(right_panel_widget)
-        self.splitter.setCollapsible(0, False)
-        self.splitter.setCollapsible(1, False)
+        self.splitter.setCollapsible(0, True)
+        self.splitter.setCollapsible(1, True)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 3)
         self.splitter.setSizes([340, 920])
@@ -1227,6 +1226,9 @@ class IPMonitorApp(QMainWindow):
     # --- IP RANGE SCANNER ---
     def open_ip_range_scanner(self):
         dlg = IpRangeScannerDialog(self)
+        is_dark = self.settings_manager.get_setting("UI", "dark_mode", bool)
+        theme_qss = get_dark_theme() if (is_dark if is_dark is not None else True) else get_light_theme()
+        dlg.setStyleSheet(theme_qss)
         dlg.add_hosts_requested.connect(self.batch_add_ips)
         dlg.exec()
 

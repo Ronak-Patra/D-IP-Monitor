@@ -195,10 +195,67 @@ def get_dark_theme() -> str:
         border-color: #0284c7;
     }
 
+    QPushButton:checked {
+        background-color: #0284c7;
+        color: #ffffff;
+        border-color: #00e5ff;
+        font-weight: 700;
+    }
+
     QPushButton:disabled {
         background-color: #090e18;
         color: #475569;
         border-color: #131c2e;
+    }
+
+    /* Modern Sleek Progress Bar */
+    QProgressBar {
+        background-color: #0a1120;
+        border: 1px solid #16243b;
+        border-radius: 6px;
+        min-height: 12px;
+        max-height: 14px;
+        text-align: center;
+        color: #f1f5f9;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #00e5ff);
+        border-radius: 5px;
+    }
+
+    #btnStartScan {
+        background-color: #0284c7;
+        border: 1px solid #38bdf8;
+        color: #ffffff;
+        font-weight: 700;
+    }
+    #btnStartScan:hover {
+        background-color: #0369a1;
+        border-color: #00e5ff;
+    }
+    #btnStartScan:disabled {
+        background-color: #0a1322;
+        border-color: #16243b;
+        color: #475569;
+    }
+
+    #btnStopScan {
+        background-color: #7f1d1d;
+        border: 1px solid #ef4444;
+        color: #ffffff;
+        font-weight: 700;
+    }
+    #btnStopScan:hover {
+        background-color: #991b1b;
+        border-color: #f87171;
+    }
+    #btnStopScan:disabled {
+        background-color: #090e18;
+        border-color: #131c2e;
+        color: #475569;
     }
 
     /* Accent Actions */
@@ -598,6 +655,63 @@ def get_light_theme() -> str:
     QPushButton:pressed {
         background-color: #cbd5e1;
         border-color: #0369a1;
+    }
+
+    QPushButton:checked {
+        background-color: #0284c7;
+        color: #ffffff;
+        border-color: #0369a1;
+        font-weight: 700;
+    }
+
+    /* Modern Sleek Progress Bar */
+    QProgressBar {
+        background-color: #e2e8f0;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        min-height: 12px;
+        max-height: 14px;
+        text-align: center;
+        color: #0f172a;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
+        border-radius: 5px;
+    }
+
+    #btnStartScan {
+        background-color: #0284c7;
+        border: 1px solid #0369a1;
+        color: #ffffff;
+        font-weight: 700;
+    }
+    #btnStartScan:hover {
+        background-color: #0369a1;
+        border-color: #0284c7;
+    }
+    #btnStartScan:disabled {
+        background-color: #f1f5f9;
+        border-color: #e2e8f0;
+        color: #94a3b8;
+    }
+
+    #btnStopScan {
+        background-color: #dc2626;
+        border: 1px solid #b91c1c;
+        color: #ffffff;
+        font-weight: 700;
+    }
+    #btnStopScan:hover {
+        background-color: #b91c1c;
+        border-color: #991b1b;
+    }
+    #btnStopScan:disabled {
+        background-color: #f1f5f9;
+        border-color: #e2e8f0;
+        color: #94a3b8;
     }
 
     /* Primary Accent Buttons */
