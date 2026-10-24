@@ -583,6 +583,7 @@ class IPMonitorApp(QMainWindow):
         self.system_tray_manager.restore_requested.connect(self.showNormal)
         self.system_tray_manager.toggle_hud_requested.connect(self.toggle_floating_hud)
         self.system_tray_manager.mute_toggled.connect(self._on_tray_mute_toggled)
+        self.system_tray_manager.minimize_tray_toggled.connect(self._on_tray_minimize_toggled)
         self.system_tray_manager.exit_requested.connect(self.force_exit_app)
 
         # Floating Mini HUD (Starts hidden on newly opened app; user toggles on demand)
@@ -904,14 +905,10 @@ class IPMonitorApp(QMainWindow):
 
         self.settings_tabs.addTab(tab_webhooks, "Webhook")
 
-        # Tab 3: Email (SMTP)
+        # Tab 3: Email (SMTP) - direct layout without nested scroll trap
         tab_email = QWidget()
-        email_scroll = QScrollArea()
-        email_scroll.setWidgetResizable(True)
-        email_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        email_content = QWidget()
-        email_layout = QVBoxLayout(email_content)
-        email_layout.setContentsMargins(4, 6, 4, 6)
+        email_layout = QVBoxLayout(tab_email)
+        email_layout.setContentsMargins(6, 8, 6, 6)
         email_layout.setSpacing(6)
 
         self.enable_global_email_alerts_checkbox = QCheckBox("Enable Email Alerts")
@@ -953,11 +950,7 @@ class IPMonitorApp(QMainWindow):
         btn_test_email = QPushButton("📧 Test Email")
         btn_test_email.clicked.connect(self.test_email_settings_ui)
         email_layout.addWidget(btn_test_email)
-        email_scroll.setWidget(email_content)
-
-        tab_email_layout = QVBoxLayout(tab_email)
-        tab_email_layout.setContentsMargins(0, 0, 0, 0)
-        tab_email_layout.addWidget(email_scroll)
+        email_layout.addStretch()
 
         self.settings_tabs.addTab(tab_email, "Email")
 
@@ -993,7 +986,9 @@ class IPMonitorApp(QMainWindow):
         self.startup_checkbox.setChecked(StartupManager.is_startup_enabled())
         system_layout.addWidget(self.startup_checkbox)
 
-        self.minimize_tray_checkbox = QCheckBox("Minimize to Tray on Close")
+        self.minimize_tray_checkbox = QCheckBox("Keep running in background when closed (Minimize to tray)")
+        self.minimize_tray_checkbox.setToolTip("When checked (ON): Closing the window keeps D IP Monitor running in the system tray.\nWhen unchecked (OFF): Closing the window completely exits the application.")
+        self.minimize_tray_checkbox.toggled.connect(self._on_minimize_tray_checkbox_toggled)
         system_layout.addWidget(self.minimize_tray_checkbox)
 
         self.enable_file_logging_checkbox = QCheckBox("Auto-rotated File Logging")
@@ -1025,11 +1020,18 @@ class IPMonitorApp(QMainWindow):
 
         settings_layout.addWidget(self.settings_tabs)
 
-        # Save Button
-        save_settings_button = QPushButton("💾 Save All Settings")
-        save_settings_button.setObjectName("btnSaveSettings")
-        save_settings_button.clicked.connect(self.save_settings_from_ui)
-        settings_layout.addWidget(save_settings_button)
+        # Save Button (Prominently pinned with pointer cursor & Ctrl+S shortcut)
+        self.btn_save_settings = QPushButton("💾 Save All Settings")
+        self.btn_save_settings.setObjectName("btnSaveSettings")
+        self.btn_save_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_settings.setMinimumHeight(36)
+        self.btn_save_settings.setToolTip("Save all settings (Shortcut: Ctrl+S)")
+        self.btn_save_settings.clicked.connect(self.save_settings_from_ui)
+        settings_layout.addWidget(self.btn_save_settings)
+
+        # Global Ctrl+S Shortcut to save settings from anywhere in the window
+        self.shortcut_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.shortcut_save.activated.connect(self.save_settings_from_ui)
 
         settings_group.setLayout(settings_layout)
         return settings_group
@@ -1171,6 +1173,9 @@ class IPMonitorApp(QMainWindow):
                 dlg.setStyleSheet(theme_qss)
             except Exception:
                 pass
+
+        if hasattr(self, 'floating_hud') and self.floating_hud:
+            self.floating_hud.set_theme(is_dark)
 
     # --- METRICS DOCK POSITION ---
     def toggle_dashboard_dock_position(self):
@@ -2118,7 +2123,9 @@ class IPMonitorApp(QMainWindow):
         self.enable_hourly_logging_checkbox.setChecked(self.settings_manager.get_setting("LOGGING", "enable_hourly_log", bool))
 
         self.startup_checkbox.setChecked(StartupManager.is_startup_enabled())
-        self.minimize_tray_checkbox.setChecked(self.settings_manager.get_setting("UI", "minimize_to_tray", bool))
+        min_to_tray = self.settings_manager.get_setting("UI", "minimize_to_tray", bool)
+        self.minimize_tray_checkbox.setChecked(min_to_tray)
+        self.system_tray_manager.set_minimize_to_tray_checked(min_to_tray)
 
         # Restore column visibility
         vis_cols_str = self.settings_manager.get_setting("UI", "visible_columns")
@@ -2130,6 +2137,7 @@ class IPMonitorApp(QMainWindow):
                 self.ip_status_table.setColumnHidden(c, str(c) not in vis_cols)
 
     def save_settings_from_ui(self):
+        # Email settings
         self.settings_manager.set_setting("EMAIL", "smtp_server", self.smtp_server_input.text().strip())
         self.settings_manager.set_setting("EMAIL", "smtp_port", self.smtp_port_input.text().strip())
         self.settings_manager.set_setting("EMAIL", "sender_email", self.sender_email_input.text().strip())
@@ -2140,38 +2148,49 @@ class IPMonitorApp(QMainWindow):
         self.settings_manager.set_setting("EMAIL", "enable_email_alerts", self.enable_global_email_alerts_checkbox.isChecked())
 
         # Webhook: Save all individual platform URLs
-        self.settings_manager.set_setting("WEBHOOK", "enable_webhooks", self.enable_webhooks_checkbox.isChecked())
         active_type = self.webhook_type_combo.currentText()
+        entered_webhook_url = self.webhook_url_input.text().strip()
         if not hasattr(self, 'platform_webhook_urls'):
             self.platform_webhook_urls = {}
-        self.platform_webhook_urls[active_type] = self.webhook_url_input.text().strip()
+        self.platform_webhook_urls[active_type] = entered_webhook_url
 
         for p, u in self.platform_webhook_urls.items():
             self.settings_manager.set_webhook_url_for_platform(p, u)
 
         self.settings_manager.set_setting("WEBHOOK", "webhook_type", active_type)
-        self.settings_manager.set_setting("WEBHOOK", "webhook_url", self.platform_webhook_urls.get(active_type, ""))
+        self.settings_manager.set_setting("WEBHOOK", "webhook_url", entered_webhook_url)
+
+        # Auto-check Enable Webhooks if a valid URL was provided
+        if entered_webhook_url and not self.enable_webhooks_checkbox.isChecked():
+            self.enable_webhooks_checkbox.setChecked(True)
+        self.settings_manager.set_setting("WEBHOOK", "enable_webhooks", self.enable_webhooks_checkbox.isChecked())
 
         # Local Alerts
         self.settings_manager.set_setting("ALERTS", "enable_popups", self.enable_global_popups_checkbox.isChecked())
         self.settings_manager.set_setting("ALERTS", "enable_sound_alerts", self.enable_global_sound_alerts_checkbox.isChecked())
         self.settings_manager.set_setting("ALERTS", "alert_sound_path", self.alert_sound_path_input.text().strip())
 
-        # Polling
+        # Polling (validate inputs and auto-focus invalid tab on error)
         try:
-            interval = int(self.ping_interval_input.text().strip())
+            raw_interval = self.ping_interval_input.text().strip()
+            interval = int(raw_interval) if raw_interval else 10
             if interval <= 0: raise ValueError
             self.settings_manager.set_setting("MONITORING", "ping_interval", interval)
             self.ping_engine.set_ping_interval(interval)
         except ValueError:
+            self.settings_tabs.setCurrentIndex(3)  # Polling tab
+            self.ping_interval_input.setFocus()
             QMessageBox.warning(self, "Invalid Input", "Ping Interval must be a positive integer.")
             return
 
         try:
-            threshold = int(self.unreachable_threshold_input.text().strip())
+            raw_thresh = self.unreachable_threshold_input.text().strip()
+            threshold = int(raw_thresh) if raw_thresh else 3
             if threshold <= 0: raise ValueError
             self.settings_manager.set_setting("MONITORING", "unreachable_threshold", threshold)
         except ValueError:
+            self.settings_tabs.setCurrentIndex(3)  # Polling tab
+            self.unreachable_threshold_input.setFocus()
             QMessageBox.warning(self, "Invalid Input", "Threshold must be a positive integer.")
             return
 
@@ -2185,8 +2204,32 @@ class IPMonitorApp(QMainWindow):
         self.log_manager.set_file_logging_enabled(self.enable_file_logging_checkbox.isChecked())
         self.log_manager.set_hourly_logging_enabled(self.enable_hourly_logging_checkbox.isChecked())
 
+        # 1. Direct synchronous write to guarantee instant persistence on disk
+        self.settings_manager.save_settings()
         self.save_load_worker.save_settings_async()
-        self.log_manager.log_incident("Application settings saved.")
+        self.log_manager.log_incident("Application settings and Webhook configuration saved successfully.")
+
+        # 2. Dynamic visual feedback on the Save button
+        if hasattr(self, 'btn_save_settings'):
+            self.btn_save_settings.setText("✅ Settings Saved!")
+            self.btn_save_settings.setStyleSheet("""
+                QPushButton#btnSaveSettings {
+                    background-color: #065f46 !important;
+                    border: 1px solid #10b981 !important;
+                    color: #ecfdf5 !important;
+                    font-weight: 700;
+                }
+            """)
+            QTimer.singleShot(2500, self._reset_save_button_style)
+
+        # 3. Desktop Toast Confirmation
+        if hasattr(self, 'system_tray_manager'):
+            self.system_tray_manager.show_toast("Settings Saved", "All application settings & webhooks were saved successfully.", False)
+
+    def _reset_save_button_style(self):
+        if hasattr(self, 'btn_save_settings'):
+            self.btn_save_settings.setText("💾 Save All Settings")
+            self.btn_save_settings.setStyleSheet("")
 
     def test_webhook_settings_ui(self):
         url = self.webhook_url_input.text().strip()
@@ -2326,6 +2369,24 @@ class IPMonitorApp(QMainWindow):
         self.enable_global_sound_alerts_checkbox.setChecked(not is_muted)
         self.save_settings_from_ui()
 
+    def _on_tray_minimize_toggled(self, is_enabled: bool):
+        """Synchronizes tray menu toggle with UI checkbox and persists to disk."""
+        self.minimize_tray_checkbox.blockSignals(True)
+        self.minimize_tray_checkbox.setChecked(is_enabled)
+        self.minimize_tray_checkbox.blockSignals(False)
+        self.settings_manager.set_setting("UI", "minimize_to_tray", str(is_enabled))
+        self.settings_manager.save_settings()
+        self.save_load_worker.save_settings_async()
+        status_msg = "enabled (runs in background on close)" if is_enabled else "disabled (exits completely on close)"
+        self.log_manager.log_incident(f"Background running on close {status_msg}.")
+
+    def _on_minimize_tray_checkbox_toggled(self, is_enabled: bool):
+        """Synchronizes UI checkbox toggle with tray context menu and persists to disk."""
+        self.system_tray_manager.set_minimize_to_tray_checked(is_enabled)
+        self.settings_manager.set_setting("UI", "minimize_to_tray", str(is_enabled))
+        self.settings_manager.save_settings()
+        self.save_load_worker.save_settings_async()
+
     def _handle_save_load_completion(self, op_type: str, success: bool, msg: str):
         if not success:
             self.log_manager.log_incident(f"ERROR: {op_type} failed: {msg}")
@@ -2346,11 +2407,17 @@ class IPMonitorApp(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        # Minimize to system tray if option is checked
-        if self.settings_manager.get_setting("UI", "minimize_to_tray", bool):
+        # Check if user wants to keep running in background (system tray)
+        keep_running = self.settings_manager.get_setting("UI", "minimize_to_tray", bool)
+
+        if keep_running:
             event.ignore()
             self.hide()
-            self.system_tray_manager.show_toast("D IP Monitor Running", "Monitoring continues in the system tray.", False)
+            self.system_tray_manager.show_toast(
+                "D IP Monitor Running in Background",
+                "Monitoring continues in the system tray. Right-click the tray icon to Exit.",
+                False
+            )
             return
 
         self.force_exit_app()

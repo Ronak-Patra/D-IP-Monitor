@@ -34,11 +34,11 @@ class FloatingHudWidget(QWidget):
         """)
 
         # Soft Neon Drop Shadow
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 229, 255, 65))
-        shadow.setOffset(0, 4)
-        self.container.setGraphicsEffect(shadow)
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(20)
+        self.shadow.setColor(QColor(0, 229, 255, 65))
+        self.shadow.setOffset(0, 4)
+        self.container.setGraphicsEffect(self.shadow)
 
         container_layout = QVBoxLayout(self.container)
         container_layout.setContentsMargins(12, 10, 12, 10)
@@ -63,57 +63,25 @@ class FloatingHudWidget(QWidget):
         self.logo_label.setStyleSheet("border: none; background: transparent;")
         title_bar.addWidget(self.logo_label)
 
-        title_label = QLabel("D IP MONITOR")
-        title_label.setStyleSheet("font-size: 11px; font-weight: 800; color: #00e5ff; letter-spacing: 1px; border: none;")
-        title_bar.addWidget(title_label)
+        self.title_label = QLabel("D IP MONITOR")
+        title_bar.addWidget(self.title_label)
 
-        hud_badge = QLabel("HUD")
-        hud_badge.setStyleSheet("""
-            background: rgba(0, 229, 255, 0.15);
-            color: #00e5ff;
-            border: 1px solid rgba(0, 229, 255, 0.3);
-            border-radius: 3px;
-            font-size: 9px;
-            font-weight: bold;
-            padding: 1px 4px;
-        """)
-        title_bar.addWidget(hud_badge)
+        self.hud_badge = QLabel("HUD")
+        title_bar.addWidget(self.hud_badge)
 
-        grip_label = QLabel("::: DRAG :::")
-        grip_label.setStyleSheet("color: #475569; font-size: 9px; font-weight: bold; border: none; letter-spacing: 1px;")
-        grip_label.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-        title_bar.addWidget(grip_label)
+        self.grip_label = QLabel("::: DRAG :::")
+        self.grip_label.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
+        title_bar.addWidget(self.grip_label)
 
         title_bar.addStretch()
 
-        btn_close = QPushButton("✕")
-        btn_close.setObjectName("hudCloseBtn")
-        btn_close.setFixedSize(22, 22)
-        btn_close.setToolTip("Hide Mini HUD")
-        btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        btn_close.setStyleSheet("""
-            QPushButton#hudCloseBtn {
-                background-color: rgba(255, 255, 255, 0.05);
-                color: #94a3b8;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 11px;
-                padding: 0px;
-                margin: 0px;
-                min-height: 0px;
-                min-width: 0px;
-                font-family: Arial, -apple-system, sans-serif;
-                font-size: 12px;
-                font-weight: bold;
-                text-align: center;
-            }
-            QPushButton#hudCloseBtn:hover {
-                background-color: #ef4444;
-                border-color: #ef4444;
-                color: #ffffff;
-            }
-        """)
-        btn_close.clicked.connect(self._handle_close)
-        title_bar.addWidget(btn_close)
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("hudCloseBtn")
+        self.btn_close.setFixedSize(22, 22)
+        self.btn_close.setToolTip("Hide Mini HUD")
+        self.btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_close.clicked.connect(self._handle_close)
+        title_bar.addWidget(self.btn_close)
 
         container_layout.addLayout(title_bar)
 
@@ -181,6 +149,167 @@ class FloatingHudWidget(QWidget):
         self.summary_label.setVisible(False)
 
         main_layout.addWidget(self.container)
+        self.set_theme(is_dark=True)
+
+    def set_theme(self, is_dark: bool):
+        """Applies dynamic theme (Dark Cyber Neon vs Clean Light Mode) to the Mini HUD."""
+        self.is_dark = is_dark
+        if is_dark:
+            # Dark Neon Mode
+            self.container.setStyleSheet("""
+                QFrame#hudContainer {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f172a, stop:0.6 #0a0f1d, stop:1 #060913);
+                    border: 1px solid rgba(0, 229, 255, 0.45);
+                    border-radius: 12px;
+                }
+            """)
+            self.shadow.setColor(QColor(0, 229, 255, 65))
+            self.title_label.setStyleSheet("font-size: 11px; font-weight: 800; color: #00e5ff; letter-spacing: 1px; border: none;")
+            self.hud_badge.setStyleSheet("""
+                background: rgba(0, 229, 255, 0.15);
+                color: #00e5ff;
+                border: 1px solid rgba(0, 229, 255, 0.3);
+                border-radius: 3px;
+                font-size: 9px;
+                font-weight: bold;
+                padding: 1px 4px;
+            """)
+            self.grip_label.setStyleSheet("color: #475569; font-size: 9px; font-weight: bold; border: none; letter-spacing: 1px;")
+            self.btn_close.setStyleSheet("""
+                QPushButton#hudCloseBtn {
+                    background-color: rgba(255, 255, 255, 0.05);
+                    color: #94a3b8;
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 11px;
+                    padding: 0px;
+                    margin: 0px;
+                    min-height: 0px;
+                    min-width: 0px;
+                    font-family: Arial, -apple-system, sans-serif;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-align: center;
+                }
+                QPushButton#hudCloseBtn:hover {
+                    background-color: #ef4444;
+                    border-color: #ef4444;
+                    color: #ffffff;
+                }
+            """)
+            self.pill_up.setStyleSheet("""
+                background-color: rgba(16, 185, 129, 0.15);
+                color: #10b981;
+                border: 1px solid rgba(16, 185, 129, 0.45);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_down.setStyleSheet("""
+                background-color: rgba(239, 68, 68, 0.15);
+                color: #ef4444;
+                border: 1px solid rgba(239, 68, 68, 0.45);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_rtt.setStyleSheet("""
+                background-color: rgba(0, 229, 255, 0.12);
+                color: #00e5ff;
+                border: 1px solid rgba(0, 229, 255, 0.4);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_health.setStyleSheet("""
+                background-color: rgba(168, 85, 247, 0.12);
+                color: #c084fc;
+                border: 1px solid rgba(168, 85, 247, 0.4);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            """)
+        else:
+            # Clean Light Mode
+            self.container.setStyleSheet("""
+                QFrame#hudContainer {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:0.6 #f8fafc, stop:1 #f1f5f9);
+                    border: 1px solid rgba(2, 132, 199, 0.4);
+                    border-radius: 12px;
+                }
+            """)
+            self.shadow.setColor(QColor(2, 132, 199, 45))
+            self.title_label.setStyleSheet("font-size: 11px; font-weight: 800; color: #0284c7; letter-spacing: 1px; border: none;")
+            self.hud_badge.setStyleSheet("""
+                background: rgba(2, 132, 199, 0.12);
+                color: #0284c7;
+                border: 1px solid rgba(2, 132, 199, 0.3);
+                border-radius: 3px;
+                font-size: 9px;
+                font-weight: bold;
+                padding: 1px 4px;
+            """)
+            self.grip_label.setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border: none; letter-spacing: 1px;")
+            self.btn_close.setStyleSheet("""
+                QPushButton#hudCloseBtn {
+                    background-color: rgba(0, 0, 0, 0.05);
+                    color: #64748b;
+                    border: 1px solid rgba(0, 0, 0, 0.12);
+                    border-radius: 11px;
+                    padding: 0px;
+                    margin: 0px;
+                    min-height: 0px;
+                    min-width: 0px;
+                    font-family: Arial, -apple-system, sans-serif;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-align: center;
+                }
+                QPushButton#hudCloseBtn:hover {
+                    background-color: #ef4444;
+                    border-color: #ef4444;
+                    color: #ffffff;
+                }
+            """)
+            self.pill_up.setStyleSheet("""
+                background-color: rgba(16, 185, 129, 0.12);
+                color: #047857;
+                border: 1px solid rgba(16, 185, 129, 0.4);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_down.setStyleSheet("""
+                background-color: rgba(239, 68, 68, 0.12);
+                color: #b91c1c;
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_rtt.setStyleSheet("""
+                background-color: rgba(2, 132, 199, 0.10);
+                color: #0369a1;
+                border: 1px solid rgba(2, 132, 199, 0.35);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            self.pill_health.setStyleSheet("""
+                background-color: rgba(147, 51, 234, 0.10);
+                color: #6b21a8;
+                border: 1px solid rgba(147, 51, 234, 0.3);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            """)
 
     def update_hud(self, ip_monitors: list):
         """Updates the HUD telemetry pills with live statistics."""

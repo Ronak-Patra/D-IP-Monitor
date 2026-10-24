@@ -55,6 +55,7 @@ class SystemTrayManager(QObject):
     restore_requested = pyqtSignal()
     toggle_hud_requested = pyqtSignal()
     mute_toggled = pyqtSignal(bool)
+    minimize_tray_toggled = pyqtSignal(bool)
     exit_requested = pyqtSignal()
 
     def __init__(self, base_icon_path: str, parent=None):
@@ -84,6 +85,12 @@ class SystemTrayManager(QObject):
         self.action_mute.toggled.connect(self.mute_toggled.emit)
         self.menu.addAction(self.action_mute)
 
+        self.action_tray_minimize = QAction("Keep Running in Background on Close", self.menu)
+        self.action_tray_minimize.setCheckable(True)
+        self.action_tray_minimize.setChecked(True)
+        self.action_tray_minimize.toggled.connect(self.minimize_tray_toggled.emit)
+        self.menu.addAction(self.action_tray_minimize)
+
         self.menu.addSeparator()
 
         self.action_exit = QAction("Exit D IP Monitor", self.menu)
@@ -95,6 +102,13 @@ class SystemTrayManager(QObject):
     def _on_tray_activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.restore_requested.emit()
+
+    def set_minimize_to_tray_checked(self, checked: bool):
+        """Updates the check state of the Keep Running in Background menu action."""
+        if hasattr(self, 'action_tray_minimize'):
+            self.action_tray_minimize.blockSignals(True)
+            self.action_tray_minimize.setChecked(checked)
+            self.action_tray_minimize.blockSignals(False)
 
     def update_tray_icon(self, has_offline_hosts: bool):
         """Paints a dynamic red indicator badge if any host is unreachable."""

@@ -9,6 +9,21 @@ class SettingsManager:
     Ensures settings and IP list persistence across application sessions.
     """
     def __init__(self, config_file="settings.ini", ip_list_file="monitored_ips.json"):
+        import sys
+        if not os.path.isabs(config_file):
+            if getattr(sys, 'frozen', False):
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+            config_file = os.path.join(app_dir, config_file)
+
+        if not os.path.isabs(ip_list_file):
+            if getattr(sys, 'frozen', False):
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+            ip_list_file = os.path.join(app_dir, ip_list_file)
+
         self.config_file = config_file
         self.ip_list_file = ip_list_file
         self.config = configparser.ConfigParser()
