@@ -25,15 +25,17 @@ class KpiCard(QFrame):
         """)
 
         self.layout_box = QHBoxLayout(self)
-        self.layout_box.setContentsMargins(10, 6, 12, 6)
+        self.layout_box.setContentsMargins(8, 4, 10, 4)
         self.layout_box.setSpacing(4)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("kpiTitle")
-        self.title_label.setStyleSheet("font-size: 10px; color: #7e8fa6; font-weight: 700; letter-spacing: 0.6px;")
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.title_label.setStyleSheet("font-size: 10px; color: #7e8fa6; font-weight: 700; letter-spacing: 0.5px;")
 
         self.value_label = QLabel(initial_value)
         self.value_label.setObjectName("kpiValue")
+        self.value_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.value_label.setStyleSheet(f"font-size: 14px; font-weight: 800; color: {accent_color};")
 
         self.layout_box.addWidget(self.title_label)
@@ -254,16 +256,18 @@ class LatencySparklineWidget(QWidget):
         painter.setPen(QPen(border_color, 1))
         painter.drawRoundedRect(1, 1, w - 2, h - 2, 8, 8)
 
-        # Draw Header Info
+        # Draw Header Info (adaptive elided text)
         painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         painter.setPen(QPen(QColor("#38bdf8" if self.is_dark_mode else "#0369a1")))
-        painter.drawText(12, 18, f"Live Latency Trend: {self.target_name}")
+        title_str = painter.fontMetrics().elidedText(f"Live Latency Trend: {self.target_name}", Qt.TextElideMode.ElideRight, w - 24)
+        painter.drawText(12, 18, title_str)
 
         if not self.samples:
             self.cached_points = []
             painter.setFont(QFont("Segoe UI", 8))
             painter.setPen(QPen(text_color))
-            painter.drawText(12, 45, "Select a host to view real-time latency history (last 30 pings)")
+            no_host_str = painter.fontMetrics().elidedText("Select a host to view real-time latency history (last 30 pings)", Qt.TextElideMode.ElideRight, w - 24)
+            painter.drawText(12, 45, no_host_str)
             return
 
         # Compute min, max, avg
@@ -273,7 +277,7 @@ class LatencySparklineWidget(QWidget):
         max_s = max(valid_samples) if valid_samples else 1.0
         avg_s = (sum(valid_samples) / len(valid_samples)) if valid_samples else 0.0
 
-        # Stats sub-header (show hovered sample details if actively hovering)
+        # Stats sub-header (adaptive format & elided)
         painter.setFont(QFont("Segoe UI", 8))
         if 0 <= self.hover_index < len(self.samples):
             h_val = self.samples[self.hover_index]
@@ -282,11 +286,15 @@ class LatencySparklineWidget(QWidget):
             age_str = "Latest Ping" if age == 0 else f"{age} pings ago"
             val_display = f"{h_val:.1f}ms" if h_val > 0 else "TIMEOUT / LOST"
             painter.setPen(QPen(QColor("#00e5ff" if self.is_dark_mode else "#0284c7")))
-            stats_text = f"Sample #{self.hover_index + 1}/{total} ({age_str}): {val_display}   |   Current: {curr_sample:.1f}ms   |   Avg: {avg_s:.1f}ms"
+            stats_text = f"#{self.hover_index + 1}/{total} ({age_str}): {val_display} | Cur: {curr_sample:.1f}ms | Avg: {avg_s:.1f}ms"
         else:
             painter.setPen(QPen(text_color))
-            stats_text = f"Current: {curr_sample:.1f}ms  |  Avg: {avg_s:.1f}ms  |  Min: {min_s:.1f}ms  |  Max: {max_s:.1f}ms"
-        painter.drawText(12, 33, stats_text)
+            if w < 330:
+                stats_text = f"Cur: {curr_sample:.1f}ms | Avg: {avg_s:.1f}ms | Max: {max_s:.1f}ms"
+            else:
+                stats_text = f"Current: {curr_sample:.1f}ms  |  Avg: {avg_s:.1f}ms  |  Min: {min_s:.1f}ms  |  Max: {max_s:.1f}ms"
+        stats_elided = painter.fontMetrics().elidedText(stats_text, Qt.TextElideMode.ElideRight, w - 24)
+        painter.drawText(12, 33, stats_elided)
 
         # Plot Area bounds
         plot_x = 12

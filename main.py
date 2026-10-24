@@ -774,19 +774,23 @@ class IPMonitorApp(QMainWindow):
             self.top_metrics_container.layout().addWidget(self.metrics_banner)
             self.right_panel_sparkline_container.layout().addWidget(self.sparkline_widget)
 
-        # Wrap Left Panel in smooth QScrollArea
+        # Wrap Left Panel in smooth QScrollArea with adaptive width & no horizontal scroll clipping
         self.left_scroll_area = QScrollArea()
         self.left_scroll_area.setObjectName("leftScrollArea")
         self.left_scroll_area.setWidgetResizable(True)
         self.left_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.left_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.left_scroll_area.setMinimumWidth(290)
         self.left_scroll_area.viewport().setObjectName("leftScrollViewport")
         self.left_scroll_area.setWidget(self.left_panel_widget)
 
         self.splitter.addWidget(self.left_scroll_area)
         self.splitter.addWidget(right_panel_widget)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 3)
-        self.splitter.setSizes([350, 910])
+        self.splitter.setSizes([340, 920])
 
         main_layout.addWidget(self.splitter)
 
@@ -803,8 +807,8 @@ class IPMonitorApp(QMainWindow):
         layout.setSpacing(8)
 
         form_layout = QFormLayout()
-        form_layout.setHorizontalSpacing(8)
-        form_layout.setVerticalSpacing(6)
+        form_layout.setHorizontalSpacing(6)
+        form_layout.setVerticalSpacing(5)
 
         self.ip_address_input = QLineEdit()
         self.ip_address_input.setPlaceholderText("e.g. 8.8.8.8 or gateway.local")
@@ -822,14 +826,16 @@ class IPMonitorApp(QMainWindow):
         layout.addLayout(form_layout)
 
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
+        button_layout.setSpacing(6)
         add_ip_button = QPushButton("＋ Add Host")
         add_ip_button.setObjectName("btnAddIp")
+        add_ip_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         add_ip_button.clicked.connect(self.add_ip_monitor_ui)
         button_layout.addWidget(add_ip_button)
 
-        remove_ip_button = QPushButton("🗑 Remove Selected")
+        remove_ip_button = QPushButton("🗑 Remove")
         remove_ip_button.setObjectName("btnRemoveIp")
+        remove_ip_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         remove_ip_button.clicked.connect(self.remove_ip_monitor_ui)
         button_layout.addWidget(remove_ip_button)
         layout.addLayout(button_layout)
@@ -986,7 +992,7 @@ class IPMonitorApp(QMainWindow):
         self.startup_checkbox.setChecked(StartupManager.is_startup_enabled())
         system_layout.addWidget(self.startup_checkbox)
 
-        self.minimize_tray_checkbox = QCheckBox("Keep running in background when closed (Minimize to tray)")
+        self.minimize_tray_checkbox = QCheckBox("Run in background on Close")
         self.minimize_tray_checkbox.setToolTip("When checked (ON): Closing the window keeps D IP Monitor running in the system tray.\nWhen unchecked (OFF): Closing the window completely exits the application.")
         self.minimize_tray_checkbox.toggled.connect(self._on_minimize_tray_checkbox_toggled)
         system_layout.addWidget(self.minimize_tray_checkbox)
@@ -1092,7 +1098,7 @@ class IPMonitorApp(QMainWindow):
         self.ip_status_table.horizontalHeader().setStretchLastSection(True)
 
         self.ip_status_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.ip_status_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        self.ip_status_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.ip_status_table.setAlternatingRowColors(True)
         self.ip_status_table.verticalHeader().setDefaultSectionSize(32)
         self.ip_status_table.verticalHeader().setVisible(False)
@@ -1277,175 +1283,108 @@ class IPMonitorApp(QMainWindow):
             return
         clicked_row = clicked_item.row()
 
-        selected_indexes = self.ip_status_table.selectionModel().selectedRows()
-        selected_rows = sorted(list(set(idx.row() for idx in selected_indexes)))
+        # Strict single-row selection
+        self.ip_status_table.clearSelection()
+        self.ip_status_table.selectRow(clicked_row)
 
-        # Allow Ctrl + Right Click to append to selection
-        modifiers = QApplication.keyboardModifiers()
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
-            if clicked_row not in selected_rows:
-                selected_rows.append(clicked_row)
-                self.ip_status_table.setRangeSelected(
-                    QTableWidgetSelectionRange(clicked_row, 0, clicked_row, self.ip_status_table.columnCount() - 1),
-                    True
-                )
-        elif clicked_row not in selected_rows:
-            self.ip_status_table.selectRow(clicked_row)
-            selected_rows = [clicked_row]
-
-        selected_ips = []
-        selected_monitors = []
-        for r in selected_rows:
-            ip_item = self.ip_status_table.item(r, 0)
-            if ip_item:
-                ip_str = ip_item.text().strip()
-                selected_ips.append(ip_str)
-                m = next((mon for mon in self.ip_data_model.monitored_ips if mon.ip_address == ip_str), None)
-                if m:
-                    selected_monitors.append(m)
-
-        if not selected_ips or not selected_monitors:
+        ip_item = self.ip_status_table.item(clicked_row, 0)
+        if not ip_item:
             return
 
-        count = len(selected_monitors)
+        target_ip = ip_item.text().strip()
+        m = next((mon for mon in self.ip_data_model.monitored_ips if mon.ip_address == target_ip), None)
+        if not m:
+            return
+
+        desc = m.description if m.description and m.description != target_ip else ""
+        title_text = f"🎯 Host: {target_ip} ({desc})" if desc else f"🎯 Host: {target_ip}"
+
         menu = QMenu(self)
+        title_action = QAction(title_text, menu)
+        title_action.setEnabled(False)
+        menu.addAction(title_action)
+        menu.addSeparator()
 
-        if count == 1:
-            target_ip = selected_ips[0]
-            m = selected_monitors[0]
-            desc = m.description if m.description and m.description != target_ip else ""
-            title_text = f"🎯 Host: {target_ip} ({desc})" if desc else f"🎯 Host: {target_ip}"
-            title_action = QAction(title_text, menu)
-            title_action.setEnabled(False)
-            menu.addAction(title_action)
-            menu.addSeparator()
+        # Diagnostics for selected host
+        act_cping = menu.addAction("Live Continuous Ping")
+        act_cping.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=False))
 
-            # Modeless Diagnostics (Allows clicking/pinging other hosts while open!)
-            act_cping = menu.addAction("Live Continuous Ping")
-            act_cping.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=False))
+        act_cping_min = menu.addAction("🗕 Live Continuous Ping (Minimized)")
+        act_cping_min.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=True))
 
-            act_cping_min = menu.addAction("🗕 Live Continuous Ping (Minimized)")
-            act_cping_min.triggered.connect(lambda: self._open_diagnostic_dialog(ContinuousPingDialog, target_ip, minimized=True))
+        act_trace = menu.addAction("Traceroute (tracert)")
+        act_trace.triggered.connect(lambda: self._open_diagnostic_dialog(TracerouteDialog, target_ip))
 
-            act_trace = menu.addAction("Traceroute (tracert)")
-            act_trace.triggered.connect(lambda: self._open_diagnostic_dialog(TracerouteDialog, target_ip))
+        act_ports = menu.addAction("TCP Port Checker")
+        act_ports.triggered.connect(lambda: self._open_diagnostic_dialog(PortCheckerDialog, target_ip))
 
-            act_ports = menu.addAction("TCP Port Checker")
-            act_ports.triggered.connect(lambda: self._open_diagnostic_dialog(PortCheckerDialog, target_ip))
-
-            act_dns = menu.addAction("DNS & Reverse Lookup")
-            act_dns.triggered.connect(lambda: self._open_diagnostic_dialog(DnsLookupDialog, target_ip))
-
-            menu.addSeparator()
-
-            # Quick Actions
-            act_http = menu.addAction("Open in Browser (HTTP)")
-            act_http.triggered.connect(lambda: webbrowser.open(f"http://{target_ip}"))
-
-            act_https = menu.addAction("Open in Browser (HTTPS)")
-            act_https.triggered.connect(lambda: webbrowser.open(f"https://{target_ip}"))
-
-            act_rdp = menu.addAction("Remote Desktop (RDP)")
-            act_rdp.triggered.connect(lambda: subprocess.Popen(["mstsc.exe", f"/v:{target_ip}"]))
-
-        else:
-            # Multi-host Header
-            title_action = QAction(f"⚡ Batch Actions: {count} Hosts Selected", menu)
-            title_action.setEnabled(False)
-            menu.addAction(title_action)
-            menu.addSeparator()
-
-            # Multi-Host Diagnostics (Opens non-modal windows for all selected hosts)
-            act_cping_all = menu.addAction(f"Live Continuous Ping ({count} Hosts)")
-            act_cping_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips, minimized=False))
-
-            act_cping_min_all = menu.addAction(f"🗕 Live Continuous Ping All ({count} Hosts, Minimized)")
-            act_cping_min_all.triggered.connect(lambda: self._batch_continuous_ping(selected_ips, minimized=True))
-
-            act_trace_all = menu.addAction(f"Traceroute ({count} Hosts)")
-            act_trace_all.triggered.connect(lambda: self._batch_traceroute(selected_ips))
-
-            act_ports_all = menu.addAction(f"Port Checker ({count} Hosts)")
-            act_ports_all.triggered.connect(lambda: self._batch_port_checker(selected_ips))
-
-            act_dns_all = menu.addAction(f"DNS Lookup ({count} Hosts)")
-            act_dns_all.triggered.connect(lambda: self._batch_dns_lookup(selected_ips))
-
-            menu.addSeparator()
-
-            act_http_all = menu.addAction(f"Open All in Browser (HTTP)")
-            act_http_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "http"))
-
-            act_https_all = menu.addAction(f"Open All in Browser (HTTPS)")
-            act_https_all.triggered.connect(lambda: self._batch_open_browser(selected_ips, "https"))
+        act_dns = menu.addAction("DNS & Reverse Lookup")
+        act_dns.triggered.connect(lambda: self._open_diagnostic_dialog(DnsLookupDialog, target_ip))
 
         menu.addSeparator()
 
-        # Selection Options Submenu
-        sel_menu = menu.addMenu("☑️ Selection Options")
-        act_sel_all = sel_menu.addAction("Select All Hosts (Ctrl+A)")
-        act_sel_all.triggered.connect(self.ip_status_table.selectAll)
-        act_clear_sel = sel_menu.addAction("Clear Selection")
-        act_clear_sel.triggered.connect(self.ip_status_table.clearSelection)
+        # Quick Actions
+        act_http = menu.addAction("Open in Browser (HTTP)")
+        act_http.triggered.connect(lambda: webbrowser.open(f"http://{target_ip}"))
 
-        # Batch & Single Alert Controls Submenu
-        alert_menu = menu.addMenu(f"🔔 Alert Settings ({count} host{'s' if count > 1 else ''})")
+        act_https = menu.addAction("Open in Browser (HTTPS)")
+        act_https.triggered.connect(lambda: webbrowser.open(f"https://{target_ip}"))
+
+        act_rdp = menu.addAction("Remote Desktop (RDP)")
+        act_rdp.triggered.connect(lambda: subprocess.Popen(["mstsc.exe", f"/v:{target_ip}"]))
+
+        menu.addSeparator()
+
+        # Alert Controls Submenu
+        alert_menu = menu.addMenu("🔔 Alert Settings")
         act_on_email = alert_menu.addAction("📧 Enable Email Alerts")
-        act_on_email.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "email", True))
+        act_on_email.triggered.connect(lambda: self._batch_set_alert([m], "email", True))
         act_off_email = alert_menu.addAction("📧 Disable Email Alerts")
-        act_off_email.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "email", False))
+        act_off_email.triggered.connect(lambda: self._batch_set_alert([m], "email", False))
 
         alert_menu.addSeparator()
         act_on_popup = alert_menu.addAction("💬 Enable Popup Alerts")
-        act_on_popup.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "popup", True))
+        act_on_popup.triggered.connect(lambda: self._batch_set_alert([m], "popup", True))
         act_off_popup = alert_menu.addAction("💬 Disable Popup Alerts")
-        act_off_popup.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "popup", False))
+        act_off_popup.triggered.connect(lambda: self._batch_set_alert([m], "popup", False))
 
         alert_menu.addSeparator()
         act_on_sound = alert_menu.addAction("🔊 Enable Sound Alerts")
-        act_on_sound.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "sound", True))
+        act_on_sound.triggered.connect(lambda: self._batch_set_alert([m], "sound", True))
         act_off_sound = alert_menu.addAction("🔊 Disable Sound Alerts")
-        act_off_sound.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "sound", False))
+        act_off_sound.triggered.connect(lambda: self._batch_set_alert([m], "sound", False))
 
         alert_menu.addSeparator()
         act_on_webhook = alert_menu.addAction("🔗 Enable Webhook Alerts")
-        act_on_webhook.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "webhook", True))
+        act_on_webhook.triggered.connect(lambda: self._batch_set_alert([m], "webhook", True))
         act_off_webhook = alert_menu.addAction("🔗 Disable Webhook Alerts")
-        act_off_webhook.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "webhook", False))
+        act_off_webhook.triggered.connect(lambda: self._batch_set_alert([m], "webhook", False))
 
         alert_menu.addSeparator()
         act_on_all = alert_menu.addAction("✅ Enable ALL Alerts")
-        act_on_all.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "all", True))
+        act_on_all.triggered.connect(lambda: self._batch_set_alert([m], "all", True))
         act_off_all = alert_menu.addAction("❌ Disable ALL Alerts")
-        act_off_all.triggered.connect(lambda: self._batch_set_alert(selected_monitors, "all", False))
+        act_off_all.triggered.connect(lambda: self._batch_set_alert([m], "all", False))
 
         # Change Group / Tag
-        act_set_group = menu.addAction(f"🏷️ Set Group / Tag for {count} Host{'s' if count > 1 else ''}...")
-        act_set_group.triggered.connect(lambda: self._batch_set_group_tag(selected_monitors))
+        act_set_group = menu.addAction("🏷️ Set Group / Tag...")
+        act_set_group.triggered.connect(lambda: self._batch_set_group_tag([m]))
 
         # Reset Stats
-        act_reset_stats = menu.addAction(f"🔄 Reset Statistics ({count} host{'s' if count > 1 else ''})")
-        act_reset_stats.triggered.connect(lambda: self._batch_reset_statistics(selected_monitors))
+        act_reset_stats = menu.addAction("🔄 Reset Statistics")
+        act_reset_stats.triggered.connect(lambda: self._batch_reset_statistics([m]))
 
         menu.addSeparator()
 
         # Clipboard
-        if count == 1:
-            act_copy = menu.addAction("📋 Copy IP Address")
-            act_copy.triggered.connect(lambda: QApplication.clipboard().setText(selected_ips[0]))
-        else:
-            clip_menu = menu.addMenu(f"📋 Copy to Clipboard ({count} hosts)")
-            act_copy_ips = clip_menu.addAction("Copy IP List (One per line)")
-            act_copy_ips.triggered.connect(lambda: self._batch_copy_ips(selected_ips, as_table=False))
-            act_copy_csv = clip_menu.addAction("Copy Host Details (TSV Table)")
-            act_copy_csv.triggered.connect(lambda: self._batch_copy_ips(selected_monitors, as_table=True))
+        act_copy = menu.addAction("📋 Copy IP Address")
+        act_copy.triggered.connect(lambda: QApplication.clipboard().setText(target_ip))
 
         menu.addSeparator()
 
         # Removal
-        remove_label = "🗑️ Remove Host" if count == 1 else f"🗑️ Remove {count} Selected Hosts"
-        act_remove = menu.addAction(remove_label)
-        act_remove.triggered.connect(lambda: self._batch_remove_hosts(selected_ips))
+        act_remove = menu.addAction("🗑️ Remove Host")
+        act_remove.triggered.connect(lambda: self._batch_remove_hosts([target_ip]))
 
         menu.exec(self.ip_status_table.viewport().mapToGlobal(pos))
 
@@ -1834,7 +1773,7 @@ class IPMonitorApp(QMainWindow):
         status_text = "● ONLINE" if is_online else "● OFFLINE"
         if not status_item:
             status_item = QTableWidgetItem(status_text)
-            status_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            status_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.ip_status_table.setItem(row, 3, status_item)
         else:
@@ -1884,11 +1823,14 @@ class IPMonitorApp(QMainWindow):
         item = self.ip_status_table.item(row, col)
         if not item:
             item = QTableWidgetItem(text)
-            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             item.setTextAlignment(alignment)
             self.ip_status_table.setItem(row, col, item)
-        elif item.text() != text:
-            item.setText(text)
+        else:
+            if item.text() != text:
+                item.setText(text)
+            if not (item.flags() & Qt.ItemFlag.ItemIsSelectable):
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
 
     def _ensure_checkbox_widget(self, row: int, col: int, monitor: IpMonitor, setting_name: str, current_val: bool):
         chk = self.ip_status_table.cellWidget(row, col)
@@ -2280,19 +2222,32 @@ class IPMonitorApp(QMainWindow):
             self.description_input.clear()
 
     def remove_ip_monitor_ui(self):
+        target_ip = None
+
+        # 1. Check selected rows from selection model
         selected_indexes = self.ip_status_table.selectionModel().selectedRows()
-        if not selected_indexes:
-            QMessageBox.warning(self, "Selection Error", "Please select one or more hosts to remove.")
+        if selected_indexes:
+            ip_item = self.ip_status_table.item(selected_indexes[0].row(), 0)
+            if ip_item:
+                target_ip = ip_item.text().strip()
+
+        # 2. Fallback to currentRow() if table has an active cell
+        if not target_ip:
+            cur_row = self.ip_status_table.currentRow()
+            if cur_row >= 0:
+                ip_item = self.ip_status_table.item(cur_row, 0)
+                if ip_item:
+                    target_ip = ip_item.text().strip()
+
+        # 3. Fallback to last clicked IP (self.current_selected_ip)
+        if not target_ip and hasattr(self, 'current_selected_ip') and self.current_selected_ip:
+            target_ip = self.current_selected_ip
+
+        if not target_ip:
+            QMessageBox.warning(self, "Selection Error", "Please select a host to remove.")
             return
 
-        selected_ips = []
-        for idx in selected_indexes:
-            ip_item = self.ip_status_table.item(idx.row(), 0)
-            if ip_item:
-                selected_ips.append(ip_item.text().strip())
-
-        if selected_ips:
-            self._batch_remove_hosts(selected_ips)
+        self._batch_remove_hosts([target_ip])
 
     def toggle_ip_alert_setting_ui(self, row: int, monitor: IpMonitor, setting: str, state: int):
         is_checked = (state == Qt.CheckState.Checked.value)
