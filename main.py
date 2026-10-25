@@ -977,6 +977,29 @@ class IPMonitorApp(QMainWindow):
         self.unreachable_threshold_input.setPlaceholderText("Failures before alert (e.g., 3)")
         polling_form.addRow("Down Threshold:", self.unreachable_threshold_input)
         polling_layout.addLayout(polling_form)
+
+        # Recommendation Guidelines Card
+        rec_card = QFrame()
+        rec_card.setObjectName("recCard")
+        rec_layout = QVBoxLayout(rec_card)
+        rec_layout.setContentsMargins(10, 10, 10, 10)
+        rec_layout.setSpacing(6)
+
+        rec_title = QLabel("💡 Recommended Polling Guidelines")
+        rec_title.setObjectName("recTitle")
+        rec_layout.addWidget(rec_title)
+
+        guidelines_text = QLabel(
+            "• 1 – 20 Hosts:   2s – 5s interval  (Threshold: 2–3)\n"
+            "• 21 – 50 Hosts:  5s – 10s interval (Threshold: 3)\n"
+            "• 50+ Hosts:      10s – 30s interval (Threshold: 3–5)\n\n"
+            "⚠️ Minimum interval is 2s to prevent network saturation, socket queue bottlenecks, and ICMP rate-limiting."
+        )
+        guidelines_text.setObjectName("recText")
+        guidelines_text.setWordWrap(True)
+        rec_layout.addWidget(guidelines_text)
+
+        polling_layout.addWidget(rec_card)
         polling_layout.addStretch()
 
         self.settings_tabs.addTab(tab_polling, "Polling")

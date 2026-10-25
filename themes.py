@@ -142,6 +142,22 @@ def get_dark_theme() -> str:
         background-color: #101c33;
     }
 
+    /* Polling Recommendation Card */
+    QFrame#recCard {
+        background-color: #0b1525;
+        border: 1px solid rgba(0, 229, 255, 0.25);
+        border-radius: 7px;
+    }
+    QLabel#recTitle {
+        color: #00e5ff;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    QLabel#recText {
+        color: #94a3b8;
+        font-size: 11px;
+    }
+
     /* Clean Input Fields */
     QLineEdit, QComboBox, QSpinBox {
         border: 1px solid #1c2b44;
@@ -602,6 +618,22 @@ def get_light_theme() -> str:
     QFrame#kpiCard:hover {
         border-color: #0284c7;
         background-color: #f1f5f9;
+    }
+
+    /* Polling Recommendation Card */
+    QFrame#recCard {
+        background-color: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        border-radius: 7px;
+    }
+    QLabel#recTitle {
+        color: #0284c7;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    QLabel#recText {
+        color: #475569;
+        font-size: 11px;
     }
 
     /* Text Inputs */
