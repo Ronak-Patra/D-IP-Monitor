@@ -202,19 +202,20 @@ class LatencySparklineWidget(QWidget):
                 age = total - 1 - closest_idx
                 time_str = "Latest Ping" if age == 0 else f"{age} pings ago"
 
-                if val <= 0:
+                sample_num = age + 1
+                if val < 0:
                     status_str = "TIMEOUT / LOST"
                     status_color = "#ef4444"
                     lat_str = "No Reply (100% loss)"
                 else:
                     status_str = "ONLINE"
                     status_color = "#22c55e"
-                    lat_str = f"{val:.1f} ms"
+                    lat_str = "<1 ms" if (0 <= val < 1.0) else f"{val:.1f} ms"
 
                 tooltip_html = (
                     f"<div style='font-family: Segoe UI, sans-serif; font-size: 11px; padding: 4px; line-height: 1.4;'>"
                     f"<b style='color: #00e5ff;'>{self.target_name}</b><br/>"
-                    f"Sample: <b style='color: #94a3b8;'>#{closest_idx + 1} of {total}</b> ({time_str})<br/>"
+                    f"Sample: <b style='color: #94a3b8;'>#{sample_num} of {total}</b> ({time_str})<br/>"
                     f"Status: <b style='color: {status_color};'>{status_str}</b><br/>"
                     f"Latency: <b style='color: #f8fafc;'>{lat_str}</b>"
                     f"</div>"
@@ -283,10 +284,16 @@ class LatencySparklineWidget(QWidget):
             h_val = self.samples[self.hover_index]
             total = len(self.samples)
             age = total - 1 - self.hover_index
+            sample_num = age + 1
             age_str = "Latest Ping" if age == 0 else f"{age} pings ago"
-            val_display = f"{h_val:.1f}ms" if h_val > 0 else "TIMEOUT / LOST"
+            if h_val < 0:
+                val_display = "TIMEOUT / LOST"
+            elif 0 <= h_val < 1.0:
+                val_display = "<1ms" if h_val <= 0.5 else f"{h_val:.1f}ms"
+            else:
+                val_display = f"{h_val:.1f}ms"
             painter.setPen(QPen(QColor("#00e5ff" if self.is_dark_mode else "#0284c7")))
-            stats_text = f"#{self.hover_index + 1}/{total} ({age_str}): {val_display} | Cur: {curr_sample:.1f}ms | Avg: {avg_s:.1f}ms"
+            stats_text = f"#{sample_num}/{total} ({age_str}): {val_display} | Cur: {curr_sample:.1f}ms | Avg: {avg_s:.1f}ms"
         else:
             painter.setPen(QPen(text_color))
             if w < 330:
@@ -319,10 +326,10 @@ class LatencySparklineWidget(QWidget):
 
         for i, val in enumerate(self.samples):
             px = plot_x + i * dx
-            if val <= 0:
+            if val < 0:
                 py = plot_y + plot_h # timeout/loss sits on bottom baseline
             else:
-                ratio = min(1.0, val / display_max)
+                ratio = min(1.0, max(0.0, val) / display_max)
                 py = (plot_y + plot_h) - (ratio * plot_h)
             points.append(QPointF(px, py))
 
@@ -353,10 +360,12 @@ class LatencySparklineWidget(QWidget):
         for i in range(len(points) - 1):
             painter.drawLine(points[i], points[i + 1])
 
-        # Draw point dots
-        painter.setBrush(QBrush(accent_color))
+        # Draw point dots (red for timeout/loss, accent for successful)
         painter.setPen(QPen(QColor("#ffffff"), 1))
-        for p in points:
+        for idx_pt, p in enumerate(points):
+            pt_val = self.samples[idx_pt] if idx_pt < len(self.samples) else 0.0
+            pt_color = QColor("#ef4444") if pt_val < 0 else accent_color
+            painter.setBrush(QBrush(pt_color))
             painter.drawEllipse(p, 2.5, 2.5)
 
         # Highlight current (last) point
@@ -375,19 +384,24 @@ class LatencySparklineWidget(QWidget):
             painter.drawLine(QPointF(hover_pt.x(), plot_y), QPointF(hover_pt.x(), plot_y + plot_h))
 
             # 2. Glowing outer halo ring
-            halo_color = QColor(239, 68, 68, 90) if hover_val <= 0 else QColor(0, 229, 255, 90)
+            halo_color = QColor(239, 68, 68, 90) if hover_val < 0 else QColor(0, 229, 255, 90)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(halo_color))
             painter.drawEllipse(hover_pt, 8.0, 8.0)
 
             # Core highlighted dot
-            core_color = QColor("#ef4444") if hover_val <= 0 else QColor("#00e5ff")
+            core_color = QColor("#ef4444") if hover_val < 0 else QColor("#00e5ff")
             painter.setPen(QPen(QColor("#ffffff"), 1.5))
             painter.setBrush(QBrush(core_color))
             painter.drawEllipse(hover_pt, 4.0, 4.0)
 
             # 3. Floating on-canvas badge/chip
-            badge_text = f"{hover_val:.1f}ms" if hover_val > 0 else "LOST"
+            if hover_val < 0:
+                badge_text = "LOST"
+            elif 0 <= hover_val < 1.0:
+                badge_text = "<1ms" if hover_val <= 0.5 else f"{hover_val:.1f}ms"
+            else:
+                badge_text = f"{hover_val:.1f}ms"
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
             fm = painter.fontMetrics()
             text_w = fm.horizontalAdvance(badge_text)
@@ -409,8 +423,8 @@ class LatencySparklineWidget(QWidget):
 
             # Chip background & border
             badge_bg = QColor(11, 19, 41, 235) if self.is_dark_mode else QColor(255, 255, 255, 240)
-            badge_border = QColor("#ef4444") if hover_val <= 0 else (QColor("#00e5ff") if self.is_dark_mode else QColor("#0284c7"))
-            badge_fg = QColor("#fca5a5") if hover_val <= 0 else (QColor("#00e5ff") if self.is_dark_mode else QColor("#0369a1"))
+            badge_border = QColor("#ef4444") if hover_val < 0 else (QColor("#00e5ff") if self.is_dark_mode else QColor("#0284c7"))
+            badge_fg = QColor("#fca5a5") if hover_val < 0 else (QColor("#00e5ff") if self.is_dark_mode else QColor("#0369a1"))
 
             painter.setBrush(QBrush(badge_bg))
             painter.setPen(QPen(badge_border, 1.2))

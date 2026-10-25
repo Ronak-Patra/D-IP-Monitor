@@ -567,7 +567,7 @@ class ContinuousPingWorker(QThread):
                 creationflags=creationflags
             )
 
-            rtt_pattern = re.compile(r"time[<=](\d+\.?\d*)ms", re.IGNORECASE)
+            rtt_pattern = re.compile(r"time\s*[<=]\s*(\d+\.?\d*)\s*ms", re.IGNORECASE)
 
             for line in self.process.stdout:
                 if not self._is_running:
@@ -575,9 +575,22 @@ class ContinuousPingWorker(QThread):
                 line_str = line.strip()
                 if not line_str:
                     continue
+
+                lower_line = line_str.lower()
+                # Informational header/footer lines from Windows ping
+                if lower_line.startswith("pinging") or "ping statistics" in lower_line or "approximate round trip" in lower_line or "minimum =" in lower_line:
+                    self.ping_output_line.emit(line_str, None, 0.0)
+                    continue
+
                 match = rtt_pattern.search(line_str)
-                is_success = bool(match) or ("Reply from" in line_str)
-                rtt = float(match.group(1)) if match else 0.0
+                has_error = any(err in lower_line for err in ["unreachable", "timed out", "expired", "failure", "failed", "could not find", "transmit failed"])
+                is_success = bool(match) and not has_error
+                if is_success:
+                    rtt = float(match.group(1))
+                    if rtt == 0.0:
+                        rtt = 0.5
+                else:
+                    rtt = 0.0
                 self.ping_output_line.emit(line_str, is_success, rtt)
 
             self.process.communicate()
@@ -596,6 +609,8 @@ class ContinuousPingWorker(QThread):
 
 
 class ContinuousPingDialog(QDialog):
+    ping_sample_ready = pyqtSignal(str, bool, float) # target_ip, is_success, rtt
+
     def __init__(self, target_ip: str, parent=None):
         super().__init__(parent)
         self.target_ip = target_ip
@@ -876,28 +891,48 @@ class ContinuousPingDialog(QDialog):
         self.rtt_list.clear()
         self.update_stats()
 
-    def on_ping_line(self, line: str, is_success: bool, rtt: float):
+    def on_ping_line(self, line: str, is_success, rtt: float):
+        if is_success is None:
+            # Informational header or summary footer (do not count as sent/lost packet)
+            cursor = self.terminal.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            if self.terminal.document().characterCount() > 1:
+                cursor.insertBlock()
+            cursor.insertHtml(f"<span style='color:#94a3b8; font-family:Consolas, monospace; font-style:italic;'>{line}</span>")
+            return
+
         self.sent_count += 1
         if is_success:
             self.received_count += 1
-            if rtt > 0:
-                self.rtt_list.append(rtt)
-            # Green output for success
+            sample_rtt = max(0.1, rtt)
+            self.rtt_list.append(sample_rtt)
             color = "#4ade80"
         else:
-            # Red output for timeout/failure
+            sample_rtt = -1.0
             color = "#f87171"
+
+        self.ping_sample_ready.emit(self.target_ip, is_success, sample_rtt)
 
         vbar = self.terminal.verticalScrollBar()
         was_at_bottom = vbar.value() >= (vbar.maximum() - 25)
         prev_pos = vbar.value()
 
-        # Insert at the end using text cursor cleanly on its own block
+        # Format line with explicit error tag if failure (clarifying why time & TTL are absent!)
+        display_line = line
+        if not is_success:
+            lower = line.lower()
+            if "unreachable" in lower and "[unreachable]" not in lower:
+                display_line = f"{line}  [UNREACHABLE - NO TTL/TIME]"
+            elif "timed out" in lower and "[timeout]" not in lower:
+                display_line = f"{line}  [TIMEOUT - NO REPLY]"
+            elif "failure" in lower or "failed" in lower:
+                display_line = f"{line}  [HARDWARE/ROUTING ERROR]"
+
         cursor = self.terminal.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         if self.terminal.document().characterCount() > 1:
             cursor.insertBlock()
-        cursor.insertHtml(f"<span style='color:{color}; font-family:Consolas, monospace;'>{line}</span>")
+        cursor.insertHtml(f"<span style='color:{color}; font-family:Consolas, monospace; font-weight:{'bold' if not is_success else 'normal'};'>{display_line}</span>")
 
         if self.btn_autoscroll.isChecked() and was_at_bottom:
             vbar.setValue(vbar.maximum())

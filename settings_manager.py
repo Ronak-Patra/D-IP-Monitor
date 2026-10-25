@@ -26,7 +26,7 @@ class SettingsManager:
 
         self.config_file = config_file
         self.ip_list_file = ip_list_file
-        self.config = configparser.ConfigParser()
+        self.config = configparser.ConfigParser(interpolation=None)
 
         # Define default application settings. These are used if no config file exists
         # or if specific keys are missing from the file.
@@ -81,7 +81,7 @@ class SettingsManager:
         Loads settings from the config file. If the file or specific sections/keys
         are missing, it applies the default settings.
         """
-        self.config.read(self.config_file)
+        self.config.read(self.config_file, encoding='utf-8')
         # Apply defaults for any missing sections or keys
         for section, options in self.default_settings.items():
             if not self.config.has_section(section):
@@ -96,7 +96,7 @@ class SettingsManager:
         overwriting all current values.
         """
         
-        with open(self.config_file, 'w') as f:
+        with open(self.config_file, 'w', encoding='utf-8') as f:
             self.config.write(f)
             
         
@@ -104,7 +104,7 @@ class SettingsManager:
     def load_settings(self):
         """Loads settings from the settings.ini file."""
         # Read the file first to populate self.config
-        self.config.read(self.config_file)
+        self.config.read(self.config_file, encoding='utf-8')
         # Then, apply defaults for any missing sections/keys
         for section, keys in self.default_settings.items():
             if not self.config.has_section(section):
@@ -171,7 +171,7 @@ class SettingsManager:
         Retrieves a setting from the config, with an optional type hint for conversion.
             Converts the setting to the specified type (e.g., bool, int, float) if type_hint is provided.
         """
-        value = self.config.get(section, key, fallback=self.default_settings.get(section, {}).get(key, None))
+        value = self.config.get(section, key, raw=True, fallback=self.default_settings.get(section, {}).get(key, None))
 
         # Convert value if needed
         if type_hint is not None:

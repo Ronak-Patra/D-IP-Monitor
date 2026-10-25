@@ -106,7 +106,7 @@ class IpMonitor:
         monitor.packet_loss = float(round(data.get('packet_loss', 0.0) / 5.0) * 5.0)
         monitor.total_pings = data.get('total_pings', 0)
         monitor.failed_pings = data.get('failed_pings', 0)
-        monitor.latency_history = data.get('latency_history', [])
+        monitor.latency_history = [max(0.5, s) if s == 0.0 else s for s in data.get('latency_history', [])]
         monitor.ping_history = data.get('ping_history', [])
 
         # Convert ISO format string back to datetime object

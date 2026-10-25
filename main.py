@@ -364,7 +364,7 @@ class IPDataModel(QObject):
         monitor.add_ping_sample(is_reachable)
         monitor.total_pings += 1
         monitor.response_time = response_time
-        monitor.add_latency_sample(response_time if is_reachable else 0.0)
+        monitor.add_latency_sample(max(0.1, response_time) if is_reachable else -1.0)
 
         current_time = datetime.now()
 
@@ -1261,6 +1261,8 @@ class IPMonitorApp(QMainWindow):
 
         # Pass parent=None so this window is an independent desktop window and does NOT minimize with the main app!
         dlg = dialog_class(target_ip, parent=None)
+        if isinstance(dlg, ContinuousPingDialog):
+            dlg.ping_sample_ready.connect(self._on_continuous_ping_sample)
         dlg.setWindowIcon(self.windowIcon())
         is_dark = self.settings_manager.get_setting("UI", "dark_mode", bool)
         theme_qss = get_dark_theme() if (is_dark if is_dark is not None else True) else get_light_theme()
@@ -1278,6 +1280,18 @@ class IPMonitorApp(QMainWindow):
     def _cleanup_diagnostic_dialog(self, dlg):
         if dlg in self.active_diagnostic_dialogs:
             self.active_diagnostic_dialogs.remove(dlg)
+
+    def _on_continuous_ping_sample(self, ip_address: str, is_success: bool, rtt: float):
+        """Synchronizes live continuous ping stream samples with the host monitor and latency trend chart."""
+        monitor = next((m for m in self.ip_data_model.monitored_ips if m.ip_address == ip_address), None)
+        if not monitor:
+            return
+        monitor.add_latency_sample(max(0.1, rtt) if is_success else -1.0)
+        monitor.response_time = max(0.1, rtt) if is_success else 0.0
+        monitor.add_ping_sample(is_success)
+        if self.current_selected_ip == ip_address:
+            self.sparkline_widget.set_host_data(monitor.ip_address, monitor.description, monitor.latency_history)
+        self.ips_to_update_ui.add(ip_address)
 
     def show_host_context_menu(self, pos):
         clicked_item = self.ip_status_table.itemAt(pos)
@@ -2426,16 +2440,17 @@ def show_exception_and_exit(exc_type, exc_value, exc_traceback):
 if __name__ == "__main__":
     sys.excepthook = show_exception_and_exit
 
-    # Windows AppUserModelID for taskbar icon
+    # Windows AppUserModelID for taskbar icon and notifications
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("dipmonitor.network.app.2.0")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("D IP Monitor")
         except Exception:
             pass
 
     app = QApplication(sys.argv)
     app.setApplicationName("D IP Monitor")
+    app.setApplicationDisplayName("D IP Monitor")
 
     # Global App Icon
     base_dir = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
