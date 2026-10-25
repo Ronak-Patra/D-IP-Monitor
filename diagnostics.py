@@ -543,7 +543,7 @@ class DnsLookupDialog(QDialog):
 
 # --- 4. CONTINUOUS PING STREAM WINDOW ---
 class ContinuousPingWorker(QThread):
-    ping_output_line = pyqtSignal(str, bool, float) # line, is_success, rtt
+    ping_output_line = pyqtSignal(str, object, float) # line, is_success, rtt
     finished = pyqtSignal()
 
     def __init__(self, target_ip: str):
