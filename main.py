@@ -159,9 +159,8 @@ class PingEngine(QObject):
                         _critical_error_queue.put(f"Error in PingEngine future: {e}")
 
             elapsed_time = time.time() - start_time
-            sleep_time = self._ping_interval - elapsed_time
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            sleep_time = max(0.5, self._ping_interval - elapsed_time)
+            time.sleep(sleep_time)
 
             self._futures = []
 
@@ -389,7 +388,8 @@ class IPDataModel(QObject):
                 monitor.popup_shown_reachable = False
                 monitor.email_sent_reachable = False
                 monitor.reachable_start_time = None
-                self._trigger_unreachable_alert(monitor)
+                if old_status != "Unknown":
+                    self._trigger_unreachable_alert(monitor)
 
             elif new_status == "Reachable" and old_status == "Unreachable":
                 downtime_duration = "0s"
@@ -1938,6 +1938,12 @@ class IPMonitorApp(QMainWindow):
     def _handle_status_changed_in_model(self, monitor: IpMonitor, old_status: str, new_status: str):
         # Save to disk on real state transition
         self.save_load_worker.save_ips_async(self.ip_data_model.monitored_ips)
+        # Suppress alerts on initial state resolution from Unknown/None
+        if old_status in ("Unknown", None, ""):
+            return
+        # Suppress alert toasts during post-settings-save cooldown window
+        if time.time() < getattr(self, '_settings_save_cooldown_until', 0):
+            return
         # Windows native toast via system tray
         if self.settings_manager.get_setting("ALERTS", "enable_popups", bool) and getattr(monitor, "enable_popup_alerts_for_ip", True):
             is_down = (new_status == "Unreachable")
@@ -2132,13 +2138,17 @@ class IPMonitorApp(QMainWindow):
         try:
             raw_interval = self.ping_interval_input.text().strip()
             interval = int(raw_interval) if raw_interval else 10
-            if interval <= 0: raise ValueError
+            if interval < 2:
+                self.settings_tabs.setCurrentIndex(3)  # Polling tab
+                self.ping_interval_input.setFocus()
+                QMessageBox.warning(self, "Invalid Input", "Ping Interval must be at least 2 seconds to prevent network saturation.")
+                return
             self.settings_manager.set_setting("MONITORING", "ping_interval", interval)
             self.ping_engine.set_ping_interval(interval)
         except ValueError:
             self.settings_tabs.setCurrentIndex(3)  # Polling tab
             self.ping_interval_input.setFocus()
-            QMessageBox.warning(self, "Invalid Input", "Ping Interval must be a positive integer.")
+            QMessageBox.warning(self, "Invalid Input", "Ping Interval must be a valid integer (minimum 2 seconds).")
             return
 
         try:
@@ -2161,6 +2171,9 @@ class IPMonitorApp(QMainWindow):
         self.log_manager.set_log_directory(new_log_dir)
         self.log_manager.set_file_logging_enabled(self.enable_file_logging_checkbox.isChecked())
         self.log_manager.set_hourly_logging_enabled(self.enable_hourly_logging_checkbox.isChecked())
+
+        # Activate a 5-second cooldown window to suppress transient flap toasts while writing to disk
+        self._settings_save_cooldown_until = time.time() + 5.0
 
         # 1. Direct synchronous write to guarantee instant persistence on disk
         self.settings_manager.save_settings()
