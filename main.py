@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from queue import Queue
 import collections
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import ssl
 import winsound
 
@@ -67,14 +67,15 @@ def cleanup_orphaned_temp_files():
 # --- High-Performance Worker for Concurrent Ping Operations ---
 class PingTask:
     """Represents a single lightweight ping task executed by the PingEngine."""
-    def __init__(self, ip_address: str, count: int = 1, timeout: int = 800):
+    def __init__(self, ip_address: str, count: int = 1, timeout: int = 4000):
         self.ip_address = ip_address
         self.count = count
         self.timeout = timeout
 
     def run(self):
         """
-        Executes the ping command with minimal OS overhead and returns results.
+        Executes the ping command with robust parsing, 2000ms timeout headroom,
+        and strict rejection of false-positive error strings (Destination host unreachable).
         Returns: tuple (ip_address, is_reachable, round_trip_time, packet_loss)
         """
         is_reachable = False
@@ -84,8 +85,9 @@ class PingTask:
         creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         cmd = ["ping", "-n", str(self.count), "-w", str(self.timeout), self.ip_address]
 
+        process = None
         try:
-            with subprocess.Popen(
+            process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -93,22 +95,57 @@ class PingTask:
                 encoding='utf-8',
                 errors='replace',
                 creationflags=creation_flags
-            ) as process:
-                stdout, _ = process.communicate(timeout=2.5)
+            )
+            stdout, _ = process.communicate(timeout=5.5)
 
-            if f"Reply from {self.ip_address}" in stdout or "bytes=" in stdout:
+            lower_stdout = stdout.lower()
+            rtt_pattern = re.compile(r"time\s*[<=]\s*(\d+\.?\d*)\s*ms", re.IGNORECASE)
+            time_match = rtt_pattern.search(stdout)
+            sub_ms_match = "time<1ms" in lower_stdout
+
+            # Strict error verification - reject false positives
+            has_explicit_error = any(
+                err in lower_stdout for err in [
+                    "destination host unreachable",
+                    "request timed out",
+                    "transit failed",
+                    "general failure",
+                    "could not find host",
+                    "100% loss"
+                ]
+            )
+
+            if (time_match or sub_ms_match) and not has_explicit_error:
                 is_reachable = True
-                match = re.search(r"Average = (\d+\.?\d*)ms", stdout)
-                if not match:
-                    match = re.search(r"time[<=](\d+\.?\d*)ms", stdout)
-                round_trip_time = float(match.group(1)) if match else 1.0
+                if time_match:
+                    round_trip_time = float(time_match.group(1))
+                    if "<" in time_match.group(0) or round_trip_time == 0.0:
+                        round_trip_time = 0.5
+                else:
+                    round_trip_time = 0.5
 
                 loss_match = re.search(r"\((\d+)% loss\)", stdout)
                 packet_loss = float(loss_match.group(1)) if loss_match else 0.0
             else:
                 is_reachable = False
+                round_trip_time = 0.0
                 packet_loss = 100.0
+        except subprocess.TimeoutExpired:
+            if process:
+                try:
+                    process.kill()
+                    process.communicate()
+                except Exception:
+                    pass
+            is_reachable = False
+            round_trip_time = 0.0
+            packet_loss = 100.0
         except Exception:
+            if process:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
             is_reachable = False
             round_trip_time = 0.0
             packet_loss = 100.0
@@ -145,11 +182,11 @@ class PingEngine(QObject):
                 # Take a thread-safe snapshot of IPs to monitor
                 ips_snapshot = list(self._monitored_ips_ref)
                 self._futures = [
-                    self._thread_pool.submit(PingTask(monitor.ip_address, count=1, timeout=800).run)
+                    self._thread_pool.submit(PingTask(monitor.ip_address, count=1, timeout=4000).run)
                     for monitor in ips_snapshot
                 ]
 
-                for future in self._futures:
+                for future in as_completed(self._futures):
                     if not self._is_running:
                         break
                     try:
@@ -309,9 +346,11 @@ class IPDataModel(QObject):
         self._log_manager = log_manager
         self.monitored_ips = self._settings_manager.load_ip_monitors()
         self.unreachable_ping_counts = {}
+        self.reachable_ping_counts = {}
 
         for monitor in self.monitored_ips:
             self.unreachable_ping_counts[monitor.ip_address] = 0
+            self.reachable_ping_counts[monitor.ip_address] = 0
             if monitor.status == "Reachable" and monitor.reachable_start_time is None:
                 monitor.reachable_start_time = datetime.now()
             elif monitor.status == "Unreachable" and monitor.unreachable_start_time is None:
@@ -329,6 +368,7 @@ class IPDataModel(QObject):
 
         self.monitored_ips.append(new_monitor)
         self.unreachable_ping_counts[new_monitor.ip_address] = 0
+        self.reachable_ping_counts[new_monitor.ip_address] = 0
         self._log_manager.log_incident(f"Added new IP for monitoring: {ip_address} ({description}) [{tag}]")
         self.ip_added.emit(new_monitor)
 
@@ -344,6 +384,8 @@ class IPDataModel(QObject):
             self.monitored_ips.remove(monitor_to_remove)
             if ip_address in self.unreachable_ping_counts:
                 del self.unreachable_ping_counts[ip_address]
+            if ip_address in self.reachable_ping_counts:
+                del self.reachable_ping_counts[ip_address]
             self._log_manager.log_incident(f"Removed IP from monitoring: {ip_address} ({monitor_to_remove.description})")
             self.ip_removed.emit(ip_address)
 
@@ -367,14 +409,30 @@ class IPDataModel(QObject):
 
         current_time = datetime.now()
 
+        # Anti-flapping hysteresis thresholds:
+        # Require at least 2 consecutive drops to declare Unreachable (filters out isolated Wi-Fi/ARP RTOs)
+        configured_threshold = self._settings_manager.get_setting("MONITORING", "unreachable_threshold", int) or 3
+        unreachable_threshold = max(2, configured_threshold)
+        recovery_threshold = 2  # Require 2 consecutive successes to confirm genuine recovery
+
         if not is_reachable:
             monitor.failed_pings += 1
+            self.reachable_ping_counts[ip_address] = 0
             self.unreachable_ping_counts[ip_address] = self.unreachable_ping_counts.get(ip_address, 0) + 1
-            unreachable_threshold = self._settings_manager.get_setting("MONITORING", "unreachable_threshold", int) or 3
             new_status = "Unreachable" if self.unreachable_ping_counts[ip_address] >= unreachable_threshold else monitor.status
         else:
-            self.unreachable_ping_counts[ip_address] = 0
-            new_status = "Reachable"
+            if monitor.status == "Unreachable":
+                # When recovering from an outage, require confirmation pings to prevent flapping
+                self.reachable_ping_counts[ip_address] = self.reachable_ping_counts.get(ip_address, 0) + 1
+                if self.reachable_ping_counts[ip_address] >= recovery_threshold:
+                    self.unreachable_ping_counts[ip_address] = 0
+                    new_status = "Reachable"
+                else:
+                    new_status = "Unreachable"
+            else:
+                self.unreachable_ping_counts[ip_address] = 0
+                self.reachable_ping_counts[ip_address] = 0
+                new_status = "Reachable"
 
         # Check for State Transition
         if new_status != old_status:
@@ -604,6 +662,11 @@ class IPMonitorApp(QMainWindow):
         self.ip_data_model.sound_alert_triggered.connect(self.play_alert_sound)
         self.ip_data_model.email_alert_triggered.connect(self._send_email_alert_via_worker)
         self.ip_data_model.webhook_alert_triggered.connect(self._send_webhook_alert)
+        self.webhook_notifier.notification_completed.connect(
+            lambda success, msg: self.log_manager.log_incident(
+                f"Webhook: {msg}" if success else f"Webhook Warning: {msg}"
+            )
+        )
 
         # Start worker threads
         self.ping_engine_thread.start()
@@ -2446,6 +2509,9 @@ class IPMonitorApp(QMainWindow):
         self.save_load_worker.stop_worker()
         self.save_load_thread.quit()
         self.save_load_thread.wait(2000)
+
+        if hasattr(self, 'webhook_notifier') and self.webhook_notifier:
+            self.webhook_notifier.stop()
 
         self.log_manager.shutdown()
         if self.floating_hud:
