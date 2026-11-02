@@ -876,15 +876,18 @@ class IPMonitorApp(QMainWindow):
 
         self.ip_address_input = QLineEdit()
         self.ip_address_input.setPlaceholderText("e.g. 8.8.8.8 or gateway.local")
+        self.ip_address_input.returnPressed.connect(self.add_ip_monitor_ui)
         form_layout.addRow("IP / Host:", self.ip_address_input)
 
         self.description_input = QLineEdit()
         self.description_input.setPlaceholderText("e.g. Core Switch or DNS Server")
+        self.description_input.returnPressed.connect(self.add_ip_monitor_ui)
         form_layout.addRow("Description:", self.description_input)
 
         self.tag_input = QLineEdit()
         self.tag_input.setPlaceholderText("e.g. Routers, Servers, Printers")
         self.tag_input.setText("General")
+        self.tag_input.returnPressed.connect(self.add_ip_monitor_ui)
         form_layout.addRow("Category / Tag:", self.tag_input)
 
         layout.addLayout(form_layout)
@@ -1195,7 +1198,10 @@ class IPMonitorApp(QMainWindow):
         self.ip_status_table.verticalHeader().setDefaultSectionSize(32)
         self.ip_status_table.verticalHeader().setVisible(False)
         self.ip_status_table.clicked.connect(self.on_table_item_clicked)
+        self.ip_status_table.currentCellChanged.connect(self._on_table_current_cell_changed)
+        self.ip_status_table.installEventFilter(self)
         self.ip_status_table.viewport().installEventFilter(self)
+        self.ip_table_search_input.installEventFilter(self)
 
         # Custom Sorting
         self.ip_status_table.horizontalHeader().sectionClicked.connect(self.sort_table_column_ui)
@@ -1835,16 +1841,20 @@ class IPMonitorApp(QMainWindow):
             QMessageBox.warning(self, "Directory Not Found", f"Log directory could not be opened:\n{log_dir}")
 
     # --- TABLE RENDERING & BATCHED UI UPDATES ---
-    def on_table_item_clicked(self, index):
-        row = index.row()
-        ip_item = self.ip_status_table.item(row, 0)
-        desc_item = self.ip_status_table.item(row, 1)
+    def _on_table_current_cell_changed(self, current_row: int, current_col: int, prev_row: int, prev_col: int):
+        if current_row < 0:
+            return
+        ip_item = self.ip_status_table.item(current_row, 0)
+        desc_item = self.ip_status_table.item(current_row, 1)
         if ip_item:
-            self.current_selected_ip = ip_item.text()
+            self.current_selected_ip = ip_item.text().strip()
             monitor = next((m for m in self.ip_data_model.monitored_ips if m.ip_address == self.current_selected_ip), None)
             if monitor:
-                desc = desc_item.text() if desc_item else monitor.description
+                desc = desc_item.text().strip() if desc_item else monitor.description
                 self.sparkline_widget.set_host_data(monitor.ip_address, desc, monitor.latency_history)
+
+    def on_table_item_clicked(self, index):
+        self._on_table_current_cell_changed(index.row(), index.column(), -1, -1)
 
     def update_ip_status_table(self, target_ip_address: str = None, full_rebuild: bool = False):
         self.ip_status_table.setSortingEnabled(False)
@@ -2493,14 +2503,107 @@ class IPMonitorApp(QMainWindow):
             index = self.ip_status_table.indexAt(event.pos())
             if not index.isValid():
                 self.ip_status_table.clearSelection()
+
+        elif source in (self.ip_status_table, self.ip_status_table.viewport()) and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            mods = event.modifiers()
+
+            if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self.remove_ip_monitor_ui()
+                return True
+
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self.current_selected_ip:
+                    self._open_diagnostic_dialog(ContinuousPingDialog, self.current_selected_ip)
+                return True
+
+            elif key == Qt.Key.Key_C and (mods & Qt.KeyboardModifier.ControlModifier):
+                if self.current_selected_ip:
+                    QApplication.clipboard().setText(self.current_selected_ip)
+                return True
+
+            elif key == Qt.Key.Key_Space:
+                col = self.ip_status_table.currentColumn()
+                row = self.ip_status_table.currentRow()
+                if row >= 0 and col in (8, 9, 10, 11):
+                    chk = self.ip_status_table.cellWidget(row, col)
+                    if isinstance(chk, QCheckBox):
+                        chk.setChecked(not chk.isChecked())
+                        return True
+
+            elif not mods:
+                # Quick alert toggles for selected host: E=Email, P=Popup, S=Sound, W=Webhook
+                cur_row = self.ip_status_table.currentRow()
+                if cur_row >= 0:
+                    col_map = {Qt.Key.Key_E: 8, Qt.Key.Key_P: 9, Qt.Key.Key_S: 10, Qt.Key.Key_W: 11}
+                    if key in col_map:
+                        chk = self.ip_status_table.cellWidget(cur_row, col_map[key])
+                        if isinstance(chk, QCheckBox):
+                            chk.setChecked(not chk.isChecked())
+                            return True
+
+            elif key == Qt.Key.Key_Escape:
+                self.ip_status_table.clearSelection()
+                return True
+
+        elif source == self.ip_table_search_input and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.ip_status_table.setFocus()
+                if self.ip_status_table.rowCount() > 0:
+                    if self.ip_status_table.currentRow() < 0:
+                        self.ip_status_table.selectRow(0)
+                return True
+            elif event.key() == Qt.Key.Key_Escape:
+                self.ip_table_search_input.clear()
+                self.ip_status_table.setFocus()
+                return True
+
         return super().eventFilter(source, event)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_F11:
+        key = event.key()
+        mods = event.modifiers()
+
+        if key == Qt.Key.Key_F11:
             if self.isFullScreen():
                 self.showNormal()
             else:
                 self.showFullScreen()
+            return
+
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            if key == Qt.Key.Key_F:
+                self.ip_table_search_input.setFocus()
+                self.ip_table_search_input.selectAll()
+                return
+            elif key == Qt.Key.Key_N:
+                self.ip_address_input.setFocus()
+                self.ip_address_input.selectAll()
+                return
+            elif key == Qt.Key.Key_D:
+                if self.current_selected_ip:
+                    self._open_diagnostic_dialog(ContinuousPingDialog, self.current_selected_ip)
+                return
+            elif key == Qt.Key.Key_T:
+                if self.current_selected_ip:
+                    self._open_diagnostic_dialog(TracerouteDialog, self.current_selected_ip)
+                return
+            elif key == Qt.Key.Key_P:
+                if self.current_selected_ip:
+                    self._open_diagnostic_dialog(PortCheckerDialog, self.current_selected_ip)
+                return
+            elif key == Qt.Key.Key_H:
+                self.toggle_floating_hud()
+                return
+            elif key == Qt.Key.Key_M:
+                is_muted = self.settings_manager.get_setting("ALERTS", "mute_sound_alerts", bool)
+                self._on_tray_mute_toggled(not is_muted)
+                return
+
+        if key == Qt.Key.Key_F5:
+            self.update_ip_status_table(full_rebuild=True)
+            return
+
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
