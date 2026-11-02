@@ -49,6 +49,7 @@ class SettingsManager:
             "MONITORING": {
                 "ping_interval": "10",
                 "unreachable_threshold": "3",
+                "prevent_system_sleep": "True",
             },
             "LOGGING": {
                 "log_directory": os.path.join(os.path.expanduser("~"), "Documents", "IPMonitorLogs"),

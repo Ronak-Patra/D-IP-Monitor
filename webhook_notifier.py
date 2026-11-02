@@ -12,7 +12,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 class WebhookNotifier(QObject):
     """
     Asynchronous Webhook notifier supporting Discord, Slack, Telegram,
-    and Microsoft Teams / Generic webhooks.
+    Microsoft Teams (Power Automate Workflows & Legacy Connectors), and Generic webhooks.
     Guarantees strict FIFO (First-In, First-Out) chronological ordering
     and offline network buffering so DOWN alerts are always delivered before UP alerts
     without race conditions, even during internet or router outages.
@@ -64,7 +64,7 @@ class WebhookNotifier(QObject):
                 
                 if success:
                     self.notification_completed.emit(True, result_msg)
-                    # Inter-message throttle to respect Discord/Slack rate limits (500ms)
+                    # Inter-message throttle to respect Discord/Slack/Teams rate limits (500ms)
                     time.sleep(0.5)
                     break
                 
@@ -130,7 +130,46 @@ class WebhookNotifier(QObject):
                     }]
                 }
             elif "teams" in w_type:
-                payload = {
+                card_color = "Attention" if is_down else "Good"
+                facts = [
+                    {"title": "Host:", "value": f"{host_ip} ({host_desc})"},
+                    {"title": "Status:", "value": "Unreachable 🔴" if is_down else "Reachable Again 🟢"},
+                    {"title": "Timestamp:", "value": now_str}
+                ]
+                if not is_down and downtime:
+                    facts.append({"title": "Downtime:", "value": downtime})
+
+                # Modern Adaptive Card (required for Teams Workflows / Power Automate)
+                adaptive_payload = {
+                    "type": "message",
+                    "attachments": [
+                        {
+                            "contentType": "application/vnd.microsoft.card.adaptive",
+                            "contentUrl": None,
+                            "content": {
+                                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                                "type": "AdaptiveCard",
+                                "version": "1.4",
+                                "body": [
+                                    {
+                                        "type": "TextBlock",
+                                        "size": "Medium",
+                                        "weight": "Bolder",
+                                        "text": title,
+                                        "color": card_color
+                                    },
+                                    {
+                                        "type": "FactSet",
+                                        "facts": facts
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+                # Legacy MessageCard (for older Office 365 connectors)
+                legacy_payload = {
                     "@type": "MessageCard",
                     "@context": "http://schema.org/extensions",
                     "themeColor": "EF4444" if is_down else "22C55E",
@@ -141,6 +180,31 @@ class WebhookNotifier(QObject):
                         "text": desc.replace("**", "")
                     }]
                 }
+
+                # Adaptive Card is preferred for all modern Teams Webhooks and Power Automate Workflows
+                is_workflow = any(k in webhook_url.lower() for k in ["logic.azure.com", "workflows", "powerautomate"])
+                payloads_to_try = [adaptive_payload, legacy_payload] if is_workflow else [adaptive_payload, legacy_payload]
+
+                last_error = None
+                for candidate in payloads_to_try:
+                    try:
+                        data_bytes = json.dumps(candidate).encode("utf-8")
+                        req = urllib.request.Request(webhook_url, data=data_bytes, headers=headers)
+                        with urllib.request.urlopen(req, timeout=8) as resp:
+                            code = resp.getcode()
+                            if 200 <= code < 300:
+                                return True, f"Webhook sent for {host_ip}: {status_text} (Teams)", False
+                    except urllib.error.HTTPError as he:
+                        last_error = he
+                        if he.code == 400:
+                            # 400 Bad Request indicates format mismatch; try alternate schema
+                            continue
+                        raise
+                if last_error:
+                    raise last_error
+
+                return False, f"Teams webhook failed with unknown error for {host_ip}", False
+
             elif "telegram" in w_type:
                 text_msg = f"*{title}*\n\n{desc.replace('**', '*')}"
                 if "chat_id=" in webhook_url:
@@ -185,7 +249,7 @@ class WebhookNotifier(QObject):
                 # Permanent configuration error
                 return False, f"Webhook rejected (HTTP {e.code}): {e.reason}", False
             else:
-                # 5xx server error (temporary Discord/Slack glitch)
+                # 5xx server error (temporary Discord/Slack/Teams glitch)
                 return False, f"Webhook server error (HTTP {e.code}): {e.reason}", True
         except (urllib.error.URLError, socket.error, TimeoutError, ConnectionError, OSError) as e:
             # Network down / DNS lookup failure / host unreachable (temporary network outage)

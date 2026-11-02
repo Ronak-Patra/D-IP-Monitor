@@ -38,6 +38,7 @@ from dashboard_widgets import MetricsBannerWidget, LatencySparklineWidget
 from floating_hud import FloatingHudWidget
 from webhook_notifier import WebhookNotifier
 from system_tray import SystemTrayManager, StartupManager
+from power_manager import PowerManager
 from bulk_tools import BulkManager
 from themes import get_dark_theme, get_light_theme, get_dark_palette, get_light_palette
 
@@ -678,6 +679,7 @@ class IPMonitorApp(QMainWindow):
         is_dark = self.settings_manager.get_setting("UI", "dark_mode", bool)
         self.apply_theme(is_dark if is_dark is not None else True)
 
+        PowerManager.set_prevent_sleep(self.settings_manager.get_setting("MONITORING", "prevent_system_sleep", bool) is not False)
         self.log_manager.log_incident("D IP Monitor started successfully.")
 
     def _create_header_widget(self):
@@ -963,6 +965,7 @@ class IPMonitorApp(QMainWindow):
 
         self.webhook_url_input = QLineEdit()
         self.webhook_url_input.setPlaceholderText("https://discord.com/api/webhooks/...")
+        self.webhook_url_input.textChanged.connect(self._on_webhook_url_text_changed)
         webhook_form.addRow("Webhook URL:", self.webhook_url_input)
         webhook_layout.addLayout(webhook_form)
 
@@ -1081,6 +1084,10 @@ class IPMonitorApp(QMainWindow):
         self.minimize_tray_checkbox.setToolTip("When checked (ON): Closing the window keeps D IP Monitor running in the system tray.\nWhen unchecked (OFF): Closing the window completely exits the application.")
         self.minimize_tray_checkbox.toggled.connect(self._on_minimize_tray_checkbox_toggled)
         system_layout.addWidget(self.minimize_tray_checkbox)
+
+        self.prevent_sleep_checkbox = QCheckBox("Prevent Sleep while Locked (24/7 Monitoring)")
+        self.prevent_sleep_checkbox.setToolTip("Keeps CPU and network awake when Windows is locked (Win + L) or display turns off,\nallowing webhooks and emails to continue sending 24/7.")
+        system_layout.addWidget(self.prevent_sleep_checkbox)
 
         self.enable_file_logging_checkbox = QCheckBox("Auto-rotated File Logging")
         system_layout.addWidget(self.enable_file_logging_checkbox)
@@ -2055,21 +2062,36 @@ class IPMonitorApp(QMainWindow):
         placeholders = {
             "Discord": "https://discord.com/api/webhooks/...",
             "Slack": "https://hooks.slack.com/services/...",
-            "Teams": "https://outlook.office.com/webhook/...",
+            "Teams": "https://prod-XX.westus.logic.azure.com:443/workflows/... or https://*.webhook.office.com/...",
             "Telegram": "https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>",
             "Generic JSON": "https://api.yourdomain.com/webhook"
         }
         self.webhook_url_input.setPlaceholderText(placeholders.get(new_platform, "https://..."))
 
+    def _on_webhook_url_text_changed(self, text: str):
+        if not hasattr(self, 'platform_webhook_urls'):
+            self.platform_webhook_urls = {}
+        platform = getattr(self, '_current_webhook_platform', None) or self.webhook_type_combo.currentText()
+        self.platform_webhook_urls[platform] = text.strip()
+
     def _send_webhook_alert(self, host_ip: str, host_desc: str, is_down: bool, downtime: str):
         if not self.settings_manager.get_setting("WEBHOOK", "enable_webhooks", bool):
             return
-        w_type = self.settings_manager.get_setting("WEBHOOK", "webhook_type") or "Discord"
-        url = self.settings_manager.get_webhook_url_for_platform(w_type)
-        if not url:
-            url = self.settings_manager.get_setting("WEBHOOK", "webhook_url")
-        if url:
-            self.webhook_notifier.send_notification_async(url, w_type, host_ip, host_desc, is_down, downtime)
+
+        # Broadcast to all platforms that have a configured webhook URL
+        dispatched = False
+        for platform in ["Discord", "Slack", "Teams", "Telegram", "Generic JSON"]:
+            url = self.settings_manager.get_webhook_url_for_platform(platform)
+            if url:
+                self.webhook_notifier.send_notification_async(url, platform, host_ip, host_desc, is_down, downtime)
+                dispatched = True
+
+        # Fallback to legacy single webhook_url if no platform-specific URLs are set
+        if not dispatched:
+            legacy_url = self.settings_manager.get_setting("WEBHOOK", "webhook_url")
+            legacy_type = self.settings_manager.get_setting("WEBHOOK", "webhook_type") or "Discord"
+            if legacy_url:
+                self.webhook_notifier.send_notification_async(legacy_url, legacy_type, host_ip, host_desc, is_down, downtime)
 
     # --- BULK CSV / TXT & .DIPM BACKUP ---
     def import_hosts_dialog(self):
@@ -2176,6 +2198,8 @@ class IPMonitorApp(QMainWindow):
         min_to_tray = self.settings_manager.get_setting("UI", "minimize_to_tray", bool)
         self.minimize_tray_checkbox.setChecked(min_to_tray)
         self.system_tray_manager.set_minimize_to_tray_checked(min_to_tray)
+        prev_sleep = self.settings_manager.get_setting("MONITORING", "prevent_system_sleep", bool)
+        self.prevent_sleep_checkbox.setChecked(True if prev_sleep is None else prev_sleep)
 
         # Restore column visibility
         vis_cols_str = self.settings_manager.get_setting("UI", "visible_columns")
@@ -2251,6 +2275,9 @@ class IPMonitorApp(QMainWindow):
         # System & Startup
         StartupManager.set_startup_enabled(self.startup_checkbox.isChecked())
         self.settings_manager.set_setting("UI", "minimize_to_tray", self.minimize_tray_checkbox.isChecked())
+        prevent_sleep_val = self.prevent_sleep_checkbox.isChecked()
+        self.settings_manager.set_setting("MONITORING", "prevent_system_sleep", prevent_sleep_val)
+        PowerManager.set_prevent_sleep(prevent_sleep_val)
 
         new_log_dir = self.log_directory_input.text().strip()
         self.settings_manager.set_setting("LOGGING", "log_directory", new_log_dir)
@@ -2524,6 +2551,7 @@ class IPMonitorApp(QMainWindow):
                 pass
         self.active_diagnostic_dialogs.clear()
 
+        PowerManager.allow_sleep()
         QApplication.quit()
 
 
